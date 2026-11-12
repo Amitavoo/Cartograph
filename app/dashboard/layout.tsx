@@ -65,10 +65,13 @@ export default async function DashboardLayout({
               <Activity className="w-3 h-3" />
               Realtime
             </span>
-            <span className="px-2.5 py-1 rounded hover:text-[var(--color-text)] cursor-default transition-colors flex items-center gap-1 opacity-70">
-              <GitBranch className="w-3 h-3" />
-              Graph
-            </span>
+            <Link
+              href="/preview"
+              className="px-2.5 py-1 rounded hover:text-[var(--color-text)] hover:bg-[var(--color-surface-sunken)] transition-colors flex items-center gap-1 text-[var(--color-text-muted)]"
+            >
+              <GitBranch className="w-3 h-3 text-blue-500" />
+              <span>Map Preview</span>
+            </Link>
             <a
               href="https://github.com/Amitavoo/Cartograph"
               target="_blank"

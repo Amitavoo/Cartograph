@@ -16,3 +16,4 @@ export class NoFrameworkAdapter implements FrameworkAdapter {
  * Default fallback instance.
  */
 export const defaultAdapter = new NoFrameworkAdapter();
+

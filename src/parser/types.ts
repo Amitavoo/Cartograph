@@ -88,3 +88,4 @@ export interface FrameworkAdapter {
   readonly name: string;
   detect(repoPath: string, files: string[]): boolean;
 }
+

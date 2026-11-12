@@ -52,3 +52,4 @@ export function computeGraphMetrics(
     uniqueEdgesCount: uniquePairSet.size,
   };
 }
+
