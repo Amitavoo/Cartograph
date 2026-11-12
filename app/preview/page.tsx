@@ -10,18 +10,20 @@ import { LeftRail } from "./_components/left-rail";
 import { MapCanvas } from "./_components/map-canvas";
 import { DetailPane } from "./_components/detail-pane";
 
-const scaffoldData = scaffoldDataRaw as unknown as ParserOutput;
+const initialScaffoldData = scaffoldDataRaw as unknown as ParserOutput;
 
 export default function PreviewPage() {
+  const [activeData, setActiveData] = useState<ParserOutput>(initialScaffoldData);
+
   const categories = useMemo(
-    () => deriveCategories(scaffoldData.files),
-    []
+    () => deriveCategories(activeData.files),
+    [activeData.files]
   );
 
   // Compute folded module nodes and inter-node edges
   const foldingResult = useMemo(
-    () => computeFoldedGraph(scaffoldData.files, scaffoldData.edges, 24),
-    []
+    () => computeFoldedGraph(activeData.files, activeData.edges, 24),
+    [activeData.files, activeData.edges]
   );
 
   // Interactive selection state
@@ -55,13 +57,20 @@ export default function PreviewPage() {
     setSelectedFile(null);
   };
 
+  const handleUpdateData = (newData: ParserOutput) => {
+    setActiveData(newData);
+    setSelectedNodeId(null);
+    setSelectedFile(null);
+  };
+
   return (
     <div className="flex flex-col h-screen w-screen overflow-hidden bg-[var(--color-surface)] text-[var(--color-text)]">
-      {/* 1. Header */}
+      {/* 1. Header with dynamic repository title */}
       <PreviewHeader
-        filesCount={scaffoldData.files.length}
-        edgesCount={scaffoldData.edges.length}
-        foldersCount={scaffoldData.folders.length}
+        repoName={activeData.repositoryPath}
+        filesCount={activeData.files.length}
+        edgesCount={activeData.edges.length}
+        foldersCount={activeData.folders.length}
       />
 
       {/* 2. Permanent Three-Column Layout */}
@@ -69,18 +78,19 @@ export default function PreviewPage() {
         {/* Left Column: Categorized file distribution */}
         <LeftRail
           categories={categories}
-          totalFiles={scaffoldData.files.length}
+          totalFiles={activeData.files.length}
         />
 
-        {/* Center Column: Interactive Map Canvas */}
+        {/* Center Column: Interactive Map Canvas with Global Drag & Drop */}
         <MapCanvas
           nodes={foldingResult.nodes}
           edges={foldingResult.edges}
-          rawEdges={scaffoldData.edges}
+          rawEdges={activeData.edges}
           selectedNodeId={selectedNodeId}
           selectedFilePath={selectedFile?.path || null}
           onSelectNode={handleSelectNode}
           onSelectFile={handleSelectFile}
+          onUpdateData={handleUpdateData}
         />
 
         {/* Right Column: Permanent detail inspector pane */}

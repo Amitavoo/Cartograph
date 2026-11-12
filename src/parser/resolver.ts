@@ -86,6 +86,7 @@ interface PathMapping {
 export interface ResolverOptions {
   repoRoot: string;
   fileSet: Set<string>;
+  tsconfigContent?: string;
 }
 
 export class ModuleResolver {
@@ -93,14 +94,45 @@ export class ModuleResolver {
   private fileSet: Set<string>;
   private pathMappings: PathMapping[] = [];
   private baseUrl: string = ".";
+  private inMemoryTsConfig?: string;
 
   constructor(options: ResolverOptions) {
     this.repoRoot = path.resolve(options.repoRoot);
     this.fileSet = options.fileSet;
+    this.inMemoryTsConfig = options.tsconfigContent;
     this.loadTsConfig();
   }
 
   private loadTsConfig(): void {
+    if (this.inMemoryTsConfig) {
+      try {
+        const sanitized = this.inMemoryTsConfig.replace(
+          /\/\*[\s\S]*?\*\/|([^:]|^)\/\/.*$/gm,
+          "$1"
+        );
+        const parsed = JSON.parse(sanitized);
+        const compilerOptions = parsed.compilerOptions || {};
+
+        if (compilerOptions.baseUrl) {
+          this.baseUrl = compilerOptions.baseUrl;
+        }
+
+        if (compilerOptions.paths) {
+          for (const [pattern, targets] of Object.entries(compilerOptions.paths)) {
+            if (Array.isArray(targets)) {
+              this.pathMappings.push({
+                prefix: pattern,
+                targets: targets as string[],
+              });
+            }
+          }
+        }
+        return;
+      } catch {
+        // Fallback to disk or default
+      }
+    }
+
     const tsconfigPaths = [
       path.join(this.repoRoot, "tsconfig.json"),
       path.join(this.repoRoot, "jsconfig.json"),

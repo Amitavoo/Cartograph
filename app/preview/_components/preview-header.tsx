@@ -3,12 +3,14 @@ import { ThemeToggle } from "@/app/_components/theme-toggle";
 import { ArrowLeft, Compass, GitBranch, Layers, Share2 } from "lucide-react";
 
 interface PreviewHeaderProps {
+  repoName?: string;
   filesCount: number;
   edgesCount: number;
   foldersCount: number;
 }
 
 export function PreviewHeader({
+  repoName = "honojs / hono",
   filesCount,
   edgesCount,
   foldersCount,
@@ -33,10 +35,10 @@ export function PreviewHeader({
           <div>
             <div className="flex items-center gap-2">
               <span className="font-semibold text-sm tracking-tight text-[var(--color-text)]">
-                honojs / hono
+                {repoName}
               </span>
               <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[var(--color-surface-sunken)] border border-[var(--color-border)] text-[var(--color-text-muted)]">
-                preview
+                workspace
               </span>
             </div>
           </div>

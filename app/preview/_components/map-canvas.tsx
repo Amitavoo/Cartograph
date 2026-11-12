@@ -2,9 +2,16 @@
 
 import React, { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import { FoldedNode, NodeEdge } from "@/src/folding/types";
-import { ParsedFile } from "@/src/parser/types";
+import { ParsedFile, ParserOutput } from "@/src/parser/types";
 import { FoldedNodeComponent } from "./folded-node";
 import { OpenPanelComponent } from "./open-panel";
+import { DropOverlay } from "./drop-overlay";
+import { UploadProgressModal, ProcessingState } from "./upload-progress-modal";
+import {
+  traverseDataTransferItems,
+  processFileListFallback,
+  DroppedFileEntry,
+} from "@/src/utils/file-traversal";
 import {
   ZoomIn,
   ZoomOut,
@@ -12,6 +19,8 @@ import {
   FolderOpen,
   Layers,
   Sparkles,
+  UploadCloud,
+  FolderUp,
 } from "lucide-react";
 
 interface MapCanvasProps {
@@ -22,6 +31,7 @@ interface MapCanvasProps {
   selectedFilePath: string | null;
   onSelectNode: (nodeId: string | null) => void;
   onSelectFile: (file: ParsedFile | null) => void;
+  onUpdateData?: (newData: ParserOutput) => void;
 }
 
 export function MapCanvas({
@@ -32,8 +42,23 @@ export function MapCanvas({
   selectedFilePath,
   onSelectNode,
   onSelectFile,
+  onUpdateData,
 }: MapCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const folderInputRef = useRef<HTMLInputElement>(null);
+  const filesInputRef = useRef<HTMLInputElement>(null);
+
+  // Drag-and-drop state
+  const [isDraggingOver, setIsDraggingOver] = useState(false);
+  const dragCounterRef = useRef(0);
+
+  // Ingestion state modal
+  const [processingState, setProcessingState] = useState<ProcessingState>({
+    isProcessing: false,
+    stage: "traversing",
+    totalFiles: 0,
+    totalFolders: 0,
+  });
 
   // Set of opened folder node IDs
   const [openNodeIds, setOpenNodeIds] = useState<Set<string>>(new Set());
@@ -59,59 +84,274 @@ export function MapCanvas({
     return map;
   }, [nodes]);
 
-  // Toggle open/closed panel
-  const toggleNodeOpen = useCallback((nodeId: string) => {
-    setOpenNodeIds((prev) => {
-      const next = new Set(prev);
-      const wasOpen = next.has(nodeId);
+  // Prevent browser window from opening dropped files anywhere outside canvas
+  useEffect(() => {
+    const preventWindowDrop = (e: DragEvent) => {
+      e.preventDefault();
+    };
+    window.addEventListener("dragover", preventWindowDrop);
+    window.addEventListener("drop", preventWindowDrop);
 
-      if (wasOpen) {
-        next.delete(nodeId);
-      } else {
-        next.add(nodeId);
+    return () => {
+      window.removeEventListener("dragover", preventWindowDrop);
+      window.removeEventListener("drop", preventWindowDrop);
+    };
+  }, []);
 
-        // Refit rule: "Opening a folder refits the view so the new panel is visible.
-        // Refitting on open may only ever zoom out, never in."
-        setTimeout(() => {
-          if (containerRef.current) {
-            const rect = containerRef.current.getBoundingClientRect();
-            const targetNode = nodeMap.get(nodeId);
-            if (targetNode) {
-              setTransform((current) => {
-                // Check if target panel would exceed viewport boundaries
-                const panelWidth = 300;
-                const panelHeight = 360;
-                const nodeScreenX = targetNode.x * current.scale + current.x;
-                const nodeScreenY = targetNode.y * current.scale + current.y;
+  // Process dropped or selected files
+  const processIngestion = async (
+    fileEntries: DroppedFileEntry[],
+    folderCount: number,
+    skippedCount: number,
+    errors: string[] = []
+  ) => {
+    if (fileEntries.length === 0) {
+      setProcessingState({
+        isProcessing: false,
+        stage: "error",
+        totalFiles: 0,
+        totalFolders: 0,
+        errorMessage: "No valid files found in dropped selection.",
+      });
+      return;
+    }
 
-                let newScale = current.scale;
-                let newX = current.x;
-                let newY = current.y;
-
-                if (
-                  nodeScreenX + panelWidth * current.scale > rect.width - 40 ||
-                  nodeScreenY + panelHeight * current.scale > rect.height - 40 ||
-                  nodeScreenX < 40 ||
-                  nodeScreenY < 40
-                ) {
-                  // Only ever zoom out, never in
-                  const zoomFactor = Math.min(
-                    1,
-                    (rect.width * 0.8) / (panelWidth + Math.abs(targetNode.x - rect.width / 2)),
-                    (rect.height * 0.8) / (panelHeight + Math.abs(targetNode.y - rect.height / 2))
-                  );
-                  newScale = Math.min(current.scale, Math.max(0.4, current.scale * zoomFactor));
-                }
-
-                return { x: newX, y: newY, scale: newScale };
-              });
-            }
-          }
-        }, 50);
-      }
-      return next;
+    setProcessingState({
+      isProcessing: true,
+      stage: "parsing",
+      totalFiles: fileEntries.length,
+      totalFolders: folderCount,
+      skippedCount,
+      errors,
     });
-  }, [nodeMap]);
+
+    try {
+      // Determine repository name from root directory if available
+      let detectedRepoName = "drag-and-drop-workspace";
+      const sample = fileEntries[0]?.relativePath;
+      if (sample && sample.includes("/")) {
+        detectedRepoName = sample.split("/")[0];
+      }
+
+      // Read text contents of all files
+      const payloads: Array<{ path: string; content: string; size: number }> = [];
+
+      for (const entry of fileEntries) {
+        try {
+          const text = await entry.file.text();
+          payloads.push({
+            path: entry.relativePath,
+            content: text,
+            size: entry.file.size,
+          });
+        } catch {
+          // Binary or unreadable files can be skipped
+        }
+      }
+
+      const res = await fetch("/api/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          repoName: detectedRepoName,
+          files: payloads,
+        }),
+      });
+
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        throw new Error(json.error || "Failed to analyze uploaded files");
+      }
+
+      if (onUpdateData) {
+        onUpdateData(json.data);
+      }
+
+      setProcessingState({
+        isProcessing: false,
+        stage: "complete",
+        totalFiles: payloads.length,
+        totalFolders: folderCount,
+        skippedCount,
+      });
+
+      // Refit view for the newly ingested graph
+      setTimeout(() => {
+        handleFitView();
+      }, 100);
+    } catch (err: any) {
+      console.error("Ingestion failed:", err);
+      setProcessingState({
+        isProcessing: false,
+        stage: "error",
+        totalFiles: fileEntries.length,
+        totalFolders: folderCount,
+        errorMessage: err?.message || "Failed to parse files.",
+      });
+    }
+  };
+
+  // Drag and Drop Handlers
+  const handleDragEnter = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current++;
+    if (e.dataTransfer.items && e.dataTransfer.items.length > 0) {
+      setIsDraggingOver(true);
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = "copy";
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current--;
+    if (dragCounterRef.current <= 0) {
+      dragCounterRef.current = 0;
+      setIsDraggingOver(false);
+    }
+  };
+
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current = 0;
+    setIsDraggingOver(false);
+
+    const items = e.dataTransfer.items;
+    if (!items || items.length === 0) return;
+
+    setProcessingState({
+      isProcessing: true,
+      stage: "traversing",
+      totalFiles: 0,
+      totalFolders: 0,
+    });
+
+    try {
+      const traversal = await traverseDataTransferItems(
+        items,
+        (foundCount, currentFolder) => {
+          setProcessingState((prev) => ({
+            ...prev,
+            totalFiles: foundCount,
+            currentFolder,
+          }));
+        }
+      );
+
+      await processIngestion(
+        traversal.files,
+        traversal.folderCount,
+        traversal.skippedCount,
+        traversal.errors
+      );
+    } catch (err: any) {
+      setProcessingState({
+        isProcessing: false,
+        stage: "error",
+        totalFiles: 0,
+        totalFolders: 0,
+        errorMessage: err?.message || "Error reading dropped items",
+      });
+    }
+  };
+
+  // Manual Upload Handlers (Folder & Files)
+  const handleManualFolderSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const fileList = e.target.files;
+    if (!fileList || fileList.length === 0) return;
+
+    setProcessingState({
+      isProcessing: true,
+      stage: "traversing",
+      totalFiles: fileList.length,
+      totalFolders: 1,
+    });
+
+    const traversal = processFileListFallback(fileList);
+    await processIngestion(traversal.files, 1, 0);
+  };
+
+  const handleManualFilesSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const fileList = e.target.files;
+    if (!fileList || fileList.length === 0) return;
+
+    setProcessingState({
+      isProcessing: true,
+      stage: "traversing",
+      totalFiles: fileList.length,
+      totalFolders: 0,
+    });
+
+    const traversal = processFileListFallback(fileList);
+    await processIngestion(traversal.files, 0, 0);
+  };
+
+  // Toggle open/closed panel
+  const toggleNodeOpen = useCallback(
+    (nodeId: string) => {
+      setOpenNodeIds((prev) => {
+        const next = new Set(prev);
+        const wasOpen = next.has(nodeId);
+
+        if (wasOpen) {
+          next.delete(nodeId);
+        } else {
+          next.add(nodeId);
+
+          // Refit rule: "Opening a folder refits the view so the new panel is visible.
+          // Refitting on open may only ever zoom out, never in."
+          setTimeout(() => {
+            if (containerRef.current) {
+              const rect = containerRef.current.getBoundingClientRect();
+              const targetNode = nodeMap.get(nodeId);
+              if (targetNode) {
+                setTransform((current) => {
+                  const panelWidth = 320;
+                  const panelHeight = 360;
+                  const nodeScreenX = targetNode.x * current.scale + current.x;
+                  const nodeScreenY = targetNode.y * current.scale + current.y;
+
+                  let newScale = current.scale;
+                  let newX = current.x;
+                  let newY = current.y;
+
+                  if (
+                    nodeScreenX + panelWidth * current.scale > rect.width - 40 ||
+                    nodeScreenY + panelHeight * current.scale > rect.height - 40 ||
+                    nodeScreenX < 40 ||
+                    nodeScreenY < 40
+                  ) {
+                    const zoomFactor = Math.min(
+                      1,
+                      (rect.width * 0.8) /
+                        (panelWidth + Math.abs(targetNode.x - rect.width / 2)),
+                      (rect.height * 0.8) /
+                        (panelHeight + Math.abs(targetNode.y - rect.height / 2))
+                    );
+                    newScale = Math.min(
+                      current.scale,
+                      Math.max(0.4, current.scale * zoomFactor)
+                    );
+                  }
+
+                  return { x: newX, y: newY, scale: newScale };
+                });
+              }
+            }
+          }, 50);
+        }
+        return next;
+      });
+    },
+    [nodeMap]
+  );
 
   // Fit view calculation
   const handleFitView = useCallback(() => {
@@ -150,7 +390,7 @@ export function MapCanvas({
 
   // Pan interactions
   const handleMouseDown = (e: React.MouseEvent) => {
-    if (e.button !== 0) return; // Primary click only
+    if (e.button !== 0) return;
     setIsDragging(true);
     dragStart.current = { x: e.clientX - transform.x, y: e.clientY - transform.y };
   };
@@ -178,8 +418,7 @@ export function MapCanvas({
     });
   };
 
-  // Compute Active/Dimmed State:
-  // "Selecting either one keeps it, its edges, and whatever those edges connect to at full strength, and dims everything else."
+  // Compute Active/Dimmed State
   const { highlightedNodeIds, highlightedEdgeIds } = useMemo(() => {
     if (!selectedNodeId && !selectedFilePath) {
       return {
@@ -195,7 +434,6 @@ export function MapCanvas({
       const parentNode = fileToNodeMap.get(selectedFilePath);
       if (parentNode) activeNodes.add(parentNode);
 
-      // Match raw edges connected to selectedFilePath
       rawEdges.forEach((re) => {
         if (re.source === selectedFilePath || re.target === selectedFilePath) {
           const srcNode = fileToNodeMap.get(re.source);
@@ -232,11 +470,45 @@ export function MapCanvas({
       onMouseUp={handleMouseUp}
       onMouseLeave={handleMouseUp}
       onWheel={handleWheel}
+      onDragEnter={handleDragEnter}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
       className={`flex-1 h-full relative overflow-hidden bg-zinc-950 select-none ${
         isDragging ? "cursor-grabbing" : "cursor-grab"
       }`}
     >
-      {/* 1. Canvas Top Status Overlay */}
+      {/* 1. Full-Canvas Drag Overlay */}
+      <DropOverlay isVisible={isDraggingOver} />
+
+      {/* 2. Ingestion Progress & Status Modal */}
+      <UploadProgressModal
+        state={processingState}
+        onClose={() =>
+          setProcessingState((p) => ({ ...p, isProcessing: false, stage: "complete" }))
+        }
+      />
+
+      {/* 3. Hidden File/Folder Inputs for Manual Upload */}
+      <input
+        type="file"
+        ref={folderInputRef}
+        onChange={handleManualFolderSelect}
+        // @ts-expect-error webkitdirectory is standard in browser engines
+        webkitdirectory=""
+        directory=""
+        multiple
+        className="hidden"
+      />
+      <input
+        type="file"
+        ref={filesInputRef}
+        onChange={handleManualFilesSelect}
+        multiple
+        className="hidden"
+      />
+
+      {/* 4. Canvas Top Status Overlay & Manual Upload Action */}
       <div className="absolute top-3 left-3 z-20 flex items-center gap-2.5 bg-zinc-900/90 border border-zinc-800 backdrop-blur-md px-3 py-1.5 rounded-lg text-xs shadow-xl">
         <span className="flex h-2 w-2 relative">
           <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
@@ -247,12 +519,35 @@ export function MapCanvas({
           <span>Interactive Canvas</span>
         </span>
         <span className="text-zinc-700">|</span>
-        <span className="text-zinc-400 font-mono text-[11px]">
-          {nodes.length} folded nodes • {openNodeIds.size} open panels • {edges.length} inter-module edges
+        <span className="text-zinc-400 font-mono text-[11px] hidden sm:inline">
+          {nodes.length} folded nodes • {openNodeIds.size} open panels • {edges.length} edges
         </span>
+        <span className="text-zinc-700 hidden sm:inline">|</span>
+
+        {/* Manual Upload Buttons */}
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => folderInputRef.current?.click()}
+            className="flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium bg-zinc-800 hover:bg-zinc-700 text-zinc-200 transition-colors border border-zinc-700"
+            title="Import an entire folder from disk"
+          >
+            <FolderUp className="w-3 h-3 text-blue-400" />
+            <span>Import Folder</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => filesInputRef.current?.click()}
+            className="flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium bg-zinc-800 hover:bg-zinc-700 text-zinc-200 transition-colors border border-zinc-700"
+            title="Import files from disk"
+          >
+            <UploadCloud className="w-3 h-3 text-emerald-400" />
+            <span>Files</span>
+          </button>
+        </div>
       </div>
 
-      {/* 2. Floating Zoom & View Controls */}
+      {/* 5. Floating Zoom & View Controls */}
       <div className="absolute bottom-4 right-4 z-20 flex items-center gap-1 bg-zinc-900/95 border border-zinc-800 backdrop-blur-md p-1 rounded-lg text-zinc-300 shadow-xl">
         <button
           type="button"
@@ -288,7 +583,7 @@ export function MapCanvas({
         </span>
       </div>
 
-      {/* 3. Infinite Viewport Stage */}
+      {/* 6. Infinite Viewport Stage */}
       <div
         className="absolute inset-0 pointer-events-none"
         style={{
@@ -346,10 +641,9 @@ export function MapCanvas({
             const isOpenSrc = openNodeIds.has(src.id);
             const isOpenTgt = openNodeIds.has(tgt.id);
 
-            // Calculate anchor centers
-            const srcWidth = isOpenSrc ? 300 : src.width;
+            const srcWidth = isOpenSrc ? 320 : src.width;
             const srcHeight = isOpenSrc ? 280 : src.height;
-            const tgtWidth = isOpenTgt ? 300 : tgt.width;
+            const tgtWidth = isOpenTgt ? 320 : tgt.width;
             const tgtHeight = isOpenTgt ? 280 : tgt.height;
 
             const x1 = src.x + srcWidth / 2;
@@ -357,7 +651,6 @@ export function MapCanvas({
             const x2 = tgt.x + tgtWidth / 2;
             const y2 = tgt.y + tgtHeight / 2;
 
-            // Smooth cubic bezier path
             const dx = x2 - x1;
             const dy = y2 - y1;
             const curve = Math.min(100, Math.max(40, Math.hypot(dx, dy) * 0.25));
@@ -370,7 +663,6 @@ export function MapCanvas({
                 fill="none"
                 stroke={isEdgeActive ? "#3b82f6" : "rgba(113, 113, 122, 0.45)"}
                 strokeWidth={isEdgeActive ? 2.5 : Math.min(2.5, Math.max(1.2, edge.count * 0.4))}
-                strokeDasharray={isEdgeActive ? "none" : undefined}
                 markerEnd={isEdgeActive ? "url(#edge-arrow-active)" : "url(#edge-arrow)"}
                 opacity={isEdgeDimmed ? 0.08 : 1}
                 className="transition-all duration-200"
@@ -441,4 +733,3 @@ export function MapCanvas({
     </div>
   );
 }
-
