@@ -7,9 +7,10 @@
  * Usage in a client component:
  *
  *   const { session } = useSession();
+ *   const { orgId } = useAuth();
  *   const supabase = useMemo(
- *     () => createBrowserSupabaseClient(() => session?.getToken() ?? Promise.resolve(null)),
- *     [session],
+ *     () => createBrowserSupabaseClient(() => session?.getToken() ?? Promise.resolve(null), orgId),
+ *     [session, orgId],
  *   );
  */
 
@@ -17,6 +18,7 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 export function createBrowserSupabaseClient(
   getToken: () => Promise<string | null>,
+  orgId?: string | null,
 ): SupabaseClient {
   return createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -28,6 +30,9 @@ export function createBrowserSupabaseClient(
           const headers = new Headers(options.headers);
           if (token) {
             headers.set("Authorization", `Bearer ${token}`);
+          }
+          if (orgId) {
+            headers.set("x-organization-id", orgId);
           }
           return fetch(url, { ...options, headers });
         },

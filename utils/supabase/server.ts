@@ -13,7 +13,7 @@ import { auth } from "@clerk/nextjs/server";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 export async function createServerSupabaseClient(): Promise<SupabaseClient> {
-  const { getToken } = await auth();
+  const { getToken, orgId } = await auth();
   const token = await getToken();
 
   return createClient(
@@ -23,9 +23,9 @@ export async function createServerSupabaseClient(): Promise<SupabaseClient> {
       global: {
         headers: {
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          ...(orgId ? { "x-organization-id": orgId } : {}),
         },
       },
     },
   );
 }
-
