@@ -1,8 +1,9 @@
 "use client";
 
-import React from "react";
+import React, { useMemo } from "react";
 import { FoldedNode } from "@/src/folding/types";
 import { ParsedFile } from "@/src/parser/types";
+import { getFileCategoryId } from "@/src/scaffolding/categories";
 import {
   FolderOpen,
   ChevronDown,
@@ -15,6 +16,7 @@ import {
 interface OpenPanelProps {
   node: FoldedNode;
   selectedFilePath: string | null;
+  selectedCategoryId?: string | null;
   isSelectedNode: boolean;
   isDimmed: boolean;
   onClose: () => void;
@@ -25,12 +27,19 @@ interface OpenPanelProps {
 export function OpenPanelComponent({
   node,
   selectedFilePath,
+  selectedCategoryId,
   isSelectedNode,
   isDimmed,
   onClose,
   onSelectNode,
   onSelectFile,
 }: OpenPanelProps) {
+  // Category match count inside this folder
+  const matchedFilesCount = useMemo(() => {
+    if (!selectedCategoryId) return 0;
+    return node.files.filter((f) => getFileCategoryId(f.path) === selectedCategoryId).length;
+  }, [node.files, selectedCategoryId]);
+
   return (
     <div
       style={{ width: "320px" }}
@@ -60,10 +69,16 @@ export function OpenPanelComponent({
           </div>
         </div>
 
-        <div className="flex items-center gap-2 shrink-0">
-          <span className="text-[10px] font-mono font-medium px-1.5 py-0.5 rounded bg-zinc-900 text-zinc-300 border border-zinc-700 pointer-events-none">
-            {node.fileCount} files
-          </span>
+        <div className="flex items-center gap-1.5 shrink-0">
+          {selectedCategoryId ? (
+            <span className="text-[10px] font-mono font-semibold px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300 border border-blue-500/30">
+              {matchedFilesCount} matched
+            </span>
+          ) : (
+            <span className="text-[10px] font-mono font-medium px-1.5 py-0.5 rounded bg-zinc-900 text-zinc-300 border border-zinc-700 pointer-events-none">
+              {node.fileCount} files
+            </span>
+          )}
           <button
             type="button"
             onMouseDown={(e) => e.stopPropagation()}
@@ -103,6 +118,8 @@ export function OpenPanelComponent({
       >
         {node.files.map((file) => {
           const isFileSelected = selectedFilePath === file.path;
+          const isCategoryMatch = !selectedCategoryId || getFileCategoryId(file.path) === selectedCategoryId;
+
           return (
             <div
               key={file.path}
@@ -114,13 +131,19 @@ export function OpenPanelComponent({
               className={`flex items-center justify-between px-2.5 py-1.5 rounded-md text-xs cursor-pointer transition-colors group relative ${
                 isFileSelected
                   ? "bg-blue-600 text-white font-medium shadow-sm"
-                  : "text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100"
+                  : isCategoryMatch
+                  ? "text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100"
+                  : "text-zinc-600 hover:bg-zinc-800/40 opacity-30"
               }`}
             >
               <div className="flex items-center gap-2 min-w-0">
                 <FileCode
                   className={`w-3.5 h-3.5 shrink-0 ${
-                    isFileSelected ? "text-white" : "text-zinc-500 group-hover:text-blue-400"
+                    isFileSelected
+                      ? "text-white"
+                      : isCategoryMatch
+                      ? "text-zinc-500 group-hover:text-blue-400"
+                      : "text-zinc-700"
                   }`}
                 />
                 <span className="truncate font-mono text-[11px]" title={file.path}>
@@ -134,7 +157,9 @@ export function OpenPanelComponent({
                     className={`px-1 rounded ${
                       isFileSelected
                         ? "bg-blue-500/40 text-blue-100"
-                        : "bg-blue-950/60 text-blue-400"
+                        : isCategoryMatch
+                        ? "bg-blue-950/60 text-blue-400"
+                        : "text-zinc-700"
                     }`}
                   >
                     ↓{file.fanIn}
@@ -142,7 +167,11 @@ export function OpenPanelComponent({
                 )}
                 <span
                   className={
-                    isFileSelected ? "text-blue-100" : "text-zinc-500 group-hover:text-zinc-400"
+                    isFileSelected
+                      ? "text-blue-100"
+                      : isCategoryMatch
+                      ? "text-zinc-500 group-hover:text-zinc-400"
+                      : "text-zinc-700"
                   }
                 >
                   {file.lines}l
@@ -157,7 +186,11 @@ export function OpenPanelComponent({
       {node.files.length > 8 && (
         <div className="px-3 py-1.5 bg-zinc-950/80 border-t border-zinc-800/80 text-center text-[10px] font-mono text-zinc-500 flex items-center justify-between">
           <span>{node.files.length} total files</span>
-          <span>scrollable</span>
+          {selectedCategoryId ? (
+            <span className="text-blue-400 font-medium">{matchedFilesCount} match filter</span>
+          ) : (
+            <span>scrollable</span>
+          )}
         </div>
       )}
     </div>

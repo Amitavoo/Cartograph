@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useState } from "react";
 import { FoldedNode, NodeEdge } from "@/src/folding/types";
 import { ParsedFile } from "@/src/parser/types";
 import {
@@ -8,6 +8,7 @@ import {
   RepositorySummary,
   FileRelationshipIndex,
 } from "@/src/scaffolding/repository-analysis";
+import { TransitiveStep, RepositoryInsights } from "@/src/graph/traversal";
 import {
   Folder,
   FileCode,
@@ -26,6 +27,11 @@ import {
   FileText,
   CornerDownRight,
   Route,
+  Zap,
+  GitFork,
+  ChevronDown,
+  ChevronRight,
+  Repeat,
 } from "lucide-react";
 
 interface DetailPaneProps {
@@ -34,12 +40,22 @@ interface DetailPaneProps {
   selectedNode: FoldedNode | null;
   selectedFile: ParsedFile | null;
   edges: NodeEdge[];
+  rawEdges: Array<{ source: string; target: string; kind?: string }>;
+  insights: RepositoryInsights;
   allFiles: ParsedFile[];
   activeTab: "structure" | "explanation";
+  activeTraversal: {
+    type: "blast" | "chain";
+    file: ParsedFile;
+    steps: TransitiveStep[];
+  } | null;
   onTabChange: (tab: "structure" | "explanation") => void;
   onClearSelection: () => void;
   onSelectFile: (file: ParsedFile) => void;
   onSelectNode: (nodeId: string) => void;
+  onStartTraversal: (type: "blast" | "chain", file: ParsedFile) => void;
+  onClearTraversal: () => void;
+  onSelectCycle?: (cyclePaths: string[]) => void;
   hoveredNeighbourPath: string | null;
   onHoverPath: (path: string | null) => void;
 }
@@ -50,16 +66,25 @@ export function DetailPane({
   selectedNode,
   selectedFile,
   edges,
+  rawEdges,
+  insights,
   allFiles,
   activeTab,
+  activeTraversal,
   onTabChange,
   onClearSelection,
   onSelectFile,
   onSelectNode,
+  onStartTraversal,
+  onClearTraversal,
+  onSelectCycle,
   hoveredNeighbourPath,
   onHoverPath,
 }: DetailPaneProps) {
   const hasSelection = Boolean(selectedNode || selectedFile);
+
+  // Insights starts collapsed by default (never the first thing you see)
+  const [isInsightsOpen, setIsInsightsOpen] = useState(false);
 
   // File lookup map
   const fileLookup = React.useMemo(() => {
@@ -279,6 +304,101 @@ export function DetailPane({
                 })}
               </div>
             </div>
+
+            {/* Phase 6: Edge-List Insights (Starts Collapsed, never first thing seen) */}
+            <div className="border border-[var(--color-border)] rounded-xl overflow-hidden bg-[var(--color-surface-sunken)]/40 mt-4">
+              <button
+                type="button"
+                onClick={() => setIsInsightsOpen(!isInsightsOpen)}
+                className="w-full p-3 flex items-center justify-between text-left hover:bg-[var(--color-surface-raised)]/60 transition-colors group"
+              >
+                <div className="flex items-center gap-2">
+                  <div className="w-6 h-6 rounded-lg bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 flex items-center justify-center">
+                    <Sparkles className="w-3.5 h-3.5" />
+                  </div>
+                  <div>
+                    <div className="text-xs font-semibold text-[var(--color-text)] flex items-center gap-1.5">
+                      <span>Repository Insights</span>
+                      <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+                        {insights.totalInsightsCount} facts
+                      </span>
+                    </div>
+                    <div className="text-[10px] text-[var(--color-text-muted)]">
+                      Edge-list graph findings
+                    </div>
+                  </div>
+                </div>
+                <div className="text-zinc-400 group-hover:text-zinc-200 transition-transform">
+                  {isInsightsOpen ? (
+                    <ChevronDown className="w-4 h-4" />
+                  ) : (
+                    <ChevronRight className="w-4 h-4" />
+                  )}
+                </div>
+              </button>
+
+              {isInsightsOpen && (
+                <div className="p-3 border-t border-[var(--color-border)] space-y-4">
+                  {insights.sections.map((sec) => (
+                    <div key={sec.id} className="space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-semibold text-[var(--color-text)]">
+                          {sec.title}
+                        </span>
+                        <span className="text-[10px] font-mono text-[var(--color-text-muted)]">
+                          {sec.items.length} items
+                        </span>
+                      </div>
+                      {/* EXACT FIXED VERBATIM STRING */}
+                      <p className="text-[11px] text-[var(--color-text-muted)] italic leading-tight">
+                        &quot;{sec.sentence}&quot;
+                      </p>
+                      <div className="space-y-1 pt-1">
+                        {sec.items.length === 0 ? (
+                          <div className="p-2 text-center text-[11px] text-[var(--color-text-muted)] font-mono border border-dashed border-[var(--color-border)] rounded-md">
+                            None detected
+                          </div>
+                        ) : (
+                          sec.items.map((item) => (
+                            <div
+                              key={item.id}
+                              onClick={() => {
+                                if (sec.id === "cycles" && item.extraPaths) {
+                                  onSelectCycle?.(item.extraPaths);
+                                } else {
+                                  const f = fileLookup.get(item.path);
+                                  if (f) onSelectFile(f);
+                                }
+                              }}
+                              className="flex items-center justify-between px-2 py-1.5 rounded-lg border border-[var(--color-border)]/60 bg-[var(--color-surface-sunken)]/60 hover:bg-[var(--color-surface-raised)] cursor-pointer text-xs transition-colors group"
+                            >
+                              <div className="flex items-center gap-1.5 min-w-0">
+                                {sec.id === "cycles" ? (
+                                  <Repeat className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                                ) : sec.id === "zero_incoming" ? (
+                                  <BookOpen className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
+                                ) : (
+                                  <FileCode className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
+                                )}
+                                <span
+                                  className="font-mono text-[11px] truncate text-[var(--color-text)] group-hover:text-blue-400"
+                                  title={item.label}
+                                >
+                                  {item.label}
+                                </span>
+                              </div>
+                              <span className="text-[10px] font-mono text-[var(--color-text-muted)] shrink-0 ml-1.5">
+                                {item.detail}
+                              </span>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         ) : selectedFile ? (
           /* ========================================================= */
@@ -340,6 +460,137 @@ export function DetailPane({
                       files imported by this
                     </div>
                   </div>
+                </div>
+
+                {/* Phase 6: Transitive Traversal Actions (Blast Radius & Dependency Chain) */}
+                <div className="space-y-2">
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (activeTraversal?.type === "blast") {
+                          onClearTraversal();
+                        } else {
+                          onStartTraversal("blast", selectedFile);
+                        }
+                      }}
+                      className={`py-2 px-2 rounded-lg border text-xs font-semibold flex items-center justify-center gap-1.5 transition-all ${
+                        activeTraversal?.type === "blast"
+                          ? "bg-rose-500/15 border-rose-500 text-rose-400 shadow-sm"
+                          : "bg-[var(--color-surface-sunken)] border-[var(--color-border)] hover:bg-[var(--color-surface-raised)] text-[var(--color-text)] hover:border-zinc-500"
+                      }`}
+                    >
+                      <Zap className="w-3.5 h-3.5 text-rose-500" />
+                      <span>Blast radius</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (activeTraversal?.type === "chain") {
+                          onClearTraversal();
+                        } else {
+                          onStartTraversal("chain", selectedFile);
+                        }
+                      }}
+                      className={`py-2 px-2 rounded-lg border text-xs font-semibold flex items-center justify-center gap-1.5 transition-all ${
+                        activeTraversal?.type === "chain"
+                          ? "bg-indigo-500/15 border-indigo-500 text-indigo-400 shadow-sm"
+                          : "bg-[var(--color-surface-sunken)] border-[var(--color-border)] hover:bg-[var(--color-surface-raised)] text-[var(--color-text)] hover:border-zinc-500"
+                      }`}
+                    >
+                      <GitFork className="w-3.5 h-3.5 text-indigo-400" />
+                      <span>Dependency chain</span>
+                    </button>
+                  </div>
+
+                  {/* If Active Traversal, render transitive steps directly with 0 network calls */}
+                  {activeTraversal && (
+                    <div className="p-3 rounded-xl bg-[var(--color-surface-sunken)] border border-[var(--color-border)] space-y-2.5 animate-fadeIn">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          {activeTraversal.type === "blast" ? (
+                            <Zap className="w-4 h-4 text-rose-500 shrink-0" />
+                          ) : (
+                            <GitFork className="w-4 h-4 text-indigo-400 shrink-0" />
+                          )}
+                          <span className="text-xs font-bold text-[var(--color-text)] truncate">
+                            {activeTraversal.type === "blast" ? "Blast Radius" : "Dependency Chain"}
+                          </span>
+                          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 border border-zinc-700 shrink-0">
+                            2 levels deep
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={onClearTraversal}
+                          className="p-1 rounded text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 transition-colors"
+                          title="Close transitive view"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+
+                      <div className="text-[11px] text-[var(--color-text-muted)]">
+                        {activeTraversal.type === "blast"
+                          ? `Everything that breaks if this file changes (${activeTraversal.steps.length} files):`
+                          : `Everything this file needs (${activeTraversal.steps.length} dependencies):`}
+                      </div>
+
+                      {activeTraversal.steps.length === 0 ? (
+                        <div className="p-3 text-center text-xs text-[var(--color-text-muted)] font-mono border border-dashed border-[var(--color-border)] rounded-lg">
+                          No {activeTraversal.type === "blast" ? "upstream dependents" : "downstream dependencies"} within 2 levels
+                        </div>
+                      ) : (
+                        <div className="space-y-1 max-h-56 overflow-y-auto border border-[var(--color-border)] rounded-lg p-1.5 bg-zinc-950/40">
+                          {activeTraversal.steps.map((step) => {
+                            const targetFile = fileLookup.get(step.path);
+                            const isHovered = hoveredNeighbourPath === step.path;
+                            const viaName = step.via.split("/").pop();
+
+                            return (
+                              <div
+                                key={step.path}
+                                onClick={() => {
+                                  if (targetFile) onSelectFile(targetFile);
+                                }}
+                                onMouseEnter={() => onHoverPath(step.path)}
+                                onMouseLeave={() => onHoverPath(null)}
+                                className={`flex items-center justify-between px-2 py-1.5 rounded cursor-pointer text-xs transition-all ${
+                                  isHovered
+                                    ? "bg-blue-500/15 text-blue-300 font-medium border border-blue-500/30"
+                                    : "hover:bg-[var(--color-surface-raised)] text-[var(--color-text)] border border-transparent"
+                                }`}
+                              >
+                                <div className="flex items-center gap-1.5 min-w-0">
+                                  <FileCode className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
+                                  <span className="font-mono text-[11px] truncate" title={step.path}>
+                                    {step.path}
+                                  </span>
+                                </div>
+                                <div className="flex items-center gap-1.5 shrink-0">
+                                  <span
+                                    className={`text-[9px] font-mono px-1 rounded border ${
+                                      step.depth === 1
+                                        ? "bg-emerald-500/15 text-emerald-400 border-emerald-500/30"
+                                        : "bg-blue-500/15 text-blue-400 border-blue-500/30"
+                                    }`}
+                                    title={step.depth === 1 ? "Direct connection" : `Via ${step.via}`}
+                                  >
+                                    {step.depth === 1 ? "L1 direct" : `L2 via ${viaName}`}
+                                  </span>
+                                  {targetFile && (
+                                    <span className="text-[10px] font-mono text-[var(--color-text-muted)]">
+                                      {targetFile.lines}l
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 {/* List 1: Full List of Incoming Dependents */}

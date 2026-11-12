@@ -7,6 +7,29 @@ export interface FileCategory {
   count: number;
 }
 
+export function getFileCategoryId(filePath: string): string {
+  const p = filePath.toLowerCase();
+  if (p.includes(".test.") || p.includes(".spec.") || p.includes("/test/")) {
+    return "tests";
+  }
+  if (p.includes("adapters/") || p.includes("adapter/")) {
+    return "adapters";
+  }
+  if (p.includes("middleware/") || p.includes("middlewares/")) {
+    return "middleware";
+  }
+  if (p.includes("jsx/") || p.endsWith(".tsx") || p.endsWith(".jsx")) {
+    return "jsx";
+  }
+  if (p.includes("helper/") || p.includes("streaming/") || p.includes("utils/")) {
+    return "helpers";
+  }
+  if (!filePath.includes("/")) {
+    return "config";
+  }
+  return "core";
+}
+
 export function deriveCategories(files: ParsedFile[]): FileCategory[] {
   const buckets: Record<
     string,
@@ -22,21 +45,9 @@ export function deriveCategories(files: ParsedFile[]): FileCategory[] {
   };
 
   for (const file of files) {
-    const p = file.path.toLowerCase();
-    if (p.includes(".test.") || p.includes(".spec.") || p.includes("/test/")) {
-      buckets.tests.count++;
-    } else if (p.includes("adapters/")) {
-      buckets.adapters.count++;
-    } else if (p.includes("middleware/")) {
-      buckets.middleware.count++;
-    } else if (p.includes("jsx/") || p.endsWith(".tsx") || p.endsWith(".jsx")) {
-      buckets.jsx.count++;
-    } else if (p.includes("helper/") || p.includes("streaming/") || p.includes("utils/")) {
-      buckets.helpers.count++;
-    } else if (!file.path.includes("/")) {
-      buckets.config.count++;
-    } else {
-      buckets.core.count++;
+    const catId = getFileCategoryId(file.path);
+    if (buckets[catId]) {
+      buckets[catId].count++;
     }
   }
 
@@ -47,4 +58,3 @@ export function deriveCategories(files: ParsedFile[]): FileCategory[] {
     count: meta.count,
   }));
 }
-

@@ -9,6 +9,11 @@ import {
   buildFileRelationshipIndex,
   analyzeRepository,
 } from "@/src/scaffolding/repository-analysis";
+import {
+  computeTransitiveWalk,
+  computeRepositoryInsights,
+  TransitiveStep,
+} from "@/src/graph/traversal";
 import { PreviewHeader } from "./_components/preview-header";
 import { LeftRail } from "./_components/left-rail";
 import { MapCanvas } from "./_components/map-canvas";
@@ -23,6 +28,9 @@ export default function PreviewPage() {
     () => deriveCategories(activeData.files),
     [activeData.files]
   );
+
+  // Phase 6: Left rail active category filter
+  const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
 
   // Compute folded module nodes and inter-node edges
   const foldingResult = useMemo(
@@ -50,6 +58,12 @@ export default function PreviewPage() {
     [activeData.repositoryPath, activeData.files, activeData.edges, relIndex]
   );
 
+  // Phase 6: Edge-list repository insights (no model, 4 fixed sentences)
+  const insights = useMemo(
+    () => computeRepositoryInsights(activeData.files, activeData.edges),
+    [activeData.files, activeData.edges]
+  );
+
   // Phase 5 Tabs: "structure" | "explanation" (Preserved across file/module selections)
   const [activeTab, setActiveTab] = useState<"structure" | "explanation">("structure");
 
@@ -60,6 +74,16 @@ export default function PreviewPage() {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedFile, setSelectedFile] = useState<ParsedFile | null>(null);
 
+  // Phase 6: Transitive Traversal (Blast radius & Dependency chain)
+  const [activeTraversal, setActiveTraversal] = useState<{
+    type: "blast" | "chain";
+    file: ParsedFile;
+    steps: TransitiveStep[];
+  } | null>(null);
+
+  // Phase 6: Active Cycle Highlight
+  const [activeCyclePaths, setActiveCyclePaths] = useState<string[] | null>(null);
+
   const selectedNode = useMemo(() => {
     if (!selectedNodeId) return null;
     return foldingResult.nodes.find((n) => n.id === selectedNodeId) || null;
@@ -69,11 +93,15 @@ export default function PreviewPage() {
     setSelectedNodeId(nodeId);
     if (nodeId) {
       setSelectedFile(null);
+      setActiveTraversal(null);
+      setActiveCyclePaths(null);
     }
   };
 
   const handleSelectFile = (file: ParsedFile | null) => {
     setSelectedFile(file);
+    setActiveTraversal(null);
+    setActiveCyclePaths(null);
     if (file) {
       const parentNodeId = foldingResult.fileToNodeMap.get(file.path);
       if (parentNodeId) {
@@ -82,9 +110,33 @@ export default function PreviewPage() {
     }
   };
 
+  const handleStartTraversal = (type: "blast" | "chain", file: ParsedFile) => {
+    const dir = type === "blast" ? "upstream" : "downstream";
+    const steps = computeTransitiveWalk(file.path, activeData.edges, dir, 2);
+    setActiveTraversal({ type, file, steps });
+    setActiveCyclePaths(null);
+  };
+
+  const handleSelectCycle = (paths: string[]) => {
+    setActiveCyclePaths(paths);
+    setActiveTraversal(null);
+    if (paths.length > 0) {
+      const firstFile = activeData.files.find((f) => f.path === paths[0]);
+      if (firstFile) {
+        setSelectedFile(firstFile);
+        const parentNodeId = foldingResult.fileToNodeMap.get(firstFile.path);
+        if (parentNodeId) {
+          setSelectedNodeId(parentNodeId);
+        }
+      }
+    }
+  };
+
   const handleClearSelection = () => {
     setSelectedNodeId(null);
     setSelectedFile(null);
+    setActiveTraversal(null);
+    setActiveCyclePaths(null);
     setHoveredNeighbourPath(null);
   };
 
@@ -92,6 +144,8 @@ export default function PreviewPage() {
     setActiveData(newData);
     setSelectedNodeId(null);
     setSelectedFile(null);
+    setActiveTraversal(null);
+    setActiveCyclePaths(null);
     setHoveredNeighbourPath(null);
   };
 
@@ -107,19 +161,24 @@ export default function PreviewPage() {
 
       {/* 2. Permanent Three-Column Layout */}
       <div className="flex-1 flex w-full overflow-hidden min-h-0">
-        {/* Left Column: Categorized file distribution */}
+        {/* Left Column: Categorized file distribution (clickable category dimming) */}
         <LeftRail
           categories={categories}
           totalFiles={activeData.files.length}
+          selectedCategoryId={selectedCategoryId}
+          onSelectCategory={setSelectedCategoryId}
         />
 
-        {/* Center Column: Interactive Map Canvas with Bi-directional Hovering */}
+        {/* Center Column: Interactive Map Canvas with Bi-directional Hovering & Traversal */}
         <MapCanvas
           nodes={foldingResult.nodes}
           edges={foldingResult.edges}
           rawEdges={activeData.edges}
           selectedNodeId={selectedNodeId}
           selectedFilePath={selectedFile?.path || null}
+          selectedCategoryId={selectedCategoryId}
+          activeTraversalSteps={activeTraversal?.steps || null}
+          activeCyclePaths={activeCyclePaths}
           onSelectNode={handleSelectNode}
           onSelectFile={handleSelectFile}
           onUpdateData={handleUpdateData}
@@ -127,19 +186,25 @@ export default function PreviewPage() {
           onHoverPath={setHoveredNeighbourPath}
         />
 
-        {/* Right Column: Permanent Phase 5 Detail Inspector Pane */}
+        {/* Right Column: Permanent Phase 5/6 Detail Inspector Pane */}
         <DetailPane
           summary={summary}
           relIndex={relIndex}
           selectedNode={selectedNode}
           selectedFile={selectedFile}
           edges={foldingResult.edges}
+          rawEdges={activeData.edges}
+          insights={insights}
           allFiles={activeData.files}
           activeTab={activeTab}
+          activeTraversal={activeTraversal}
           onTabChange={setActiveTab}
           onClearSelection={handleClearSelection}
           onSelectFile={handleSelectFile}
           onSelectNode={handleSelectNode}
+          onStartTraversal={handleStartTraversal}
+          onClearTraversal={() => setActiveTraversal(null)}
+          onSelectCycle={handleSelectCycle}
           hoveredNeighbourPath={hoveredNeighbourPath}
           onHoverPath={setHoveredNeighbourPath}
         />

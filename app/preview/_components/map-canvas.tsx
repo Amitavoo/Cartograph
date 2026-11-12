@@ -3,6 +3,7 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import { FoldedNode, NodeEdge } from "@/src/folding/types";
 import { ParsedFile, ParserOutput } from "@/src/parser/types";
+import { getFileCategoryId } from "@/src/scaffolding/categories";
 import { FoldedNodeComponent } from "./folded-node";
 import { OpenPanelComponent } from "./open-panel";
 import {
@@ -21,6 +22,9 @@ interface MapCanvasProps {
   rawEdges: Array<{ source: string; target: string; kind?: string }>;
   selectedNodeId: string | null;
   selectedFilePath: string | null;
+  selectedCategoryId?: string | null;
+  activeTraversalSteps?: Array<{ path: string; depth: number; via: string }> | null;
+  activeCyclePaths?: string[] | null;
   onSelectNode: (nodeId: string | null) => void;
   onSelectFile: (file: ParsedFile | null) => void;
   onUpdateData?: (newData: ParserOutput) => void;
@@ -37,6 +41,9 @@ export function MapCanvas({
   rawEdges,
   selectedNodeId,
   selectedFilePath,
+  selectedCategoryId,
+  activeTraversalSteps,
+  activeCyclePaths,
   onSelectNode,
   onSelectFile,
   onUpdateData,
@@ -432,17 +439,48 @@ export function MapCanvas({
     [nodeMap, getNodePos]
   );
 
-  // Compute Active/Dimmed State (Selection + Bi-directional Hovering)
-  const { highlightedNodeIds, highlightedEdgeIds } = useMemo(() => {
-    if (!selectedNodeId && !selectedFilePath && !hoveredNeighbourPath) {
-      return {
-        highlightedNodeIds: new Set<string>(),
-        highlightedEdgeIds: new Set<string>(),
-      };
+  // Compute Category match counts per node
+  const nodeMatchCounts = useMemo(() => {
+    const map = new Map<string, number>();
+    if (!selectedCategoryId) return map;
+    for (const node of nodes) {
+      const count = node.files.filter((f) => getFileCategoryId(f.path) === selectedCategoryId).length;
+      map.set(node.id, count);
     }
+    return map;
+  }, [nodes, selectedCategoryId]);
 
+  // Compute Active/Dimmed State (Selection + Bi-directional Hovering + Traversal + Cycles)
+  const { highlightedNodeIds, highlightedEdgeIds } = useMemo(() => {
     const activeNodes = new Set<string>();
     const activeEdges = new Set<string>();
+
+    if (activeTraversalSteps && activeTraversalSteps.length > 0) {
+      for (const step of activeTraversalSteps) {
+        const stepNode = fileToNodeMap.get(step.path);
+        const viaNode = fileToNodeMap.get(step.via);
+        if (stepNode) activeNodes.add(stepNode);
+        if (viaNode) activeNodes.add(viaNode);
+        if (stepNode && viaNode && stepNode !== viaNode) {
+          activeEdges.add(`${viaNode}->${stepNode}`);
+          activeEdges.add(`${stepNode}->${viaNode}`);
+        }
+      }
+    }
+
+    if (activeCyclePaths && activeCyclePaths.length > 0) {
+      for (let i = 0; i < activeCyclePaths.length; i++) {
+        const p1 = activeCyclePaths[i];
+        const p2 = activeCyclePaths[(i + 1) % activeCyclePaths.length];
+        const n1 = fileToNodeMap.get(p1);
+        const n2 = fileToNodeMap.get(p2);
+        if (n1) activeNodes.add(n1);
+        if (n2) activeNodes.add(n2);
+        if (n1 && n2) {
+          activeEdges.add(`${n1}->${n2}`);
+        }
+      }
+    }
 
     if (hoveredNeighbourPath) {
       const parentNode = fileToNodeMap.get(hoveredNeighbourPath) || nodeMap.get(hoveredNeighbourPath)?.id;
@@ -498,13 +536,21 @@ export function MapCanvas({
     selectedNodeId,
     selectedFilePath,
     hoveredNeighbourPath,
+    activeTraversalSteps,
+    activeCyclePaths,
     edges,
     rawEdges,
     fileToNodeMap,
     nodeMap,
   ]);
 
-  const hasSelection = Boolean(selectedNodeId || selectedFilePath || hoveredNeighbourPath);
+  const hasSelection = Boolean(
+    selectedNodeId ||
+      selectedFilePath ||
+      hoveredNeighbourPath ||
+      (activeTraversalSteps && activeTraversalSteps.length > 0) ||
+      (activeCyclePaths && activeCyclePaths.length > 0)
+  );
 
   // Determine cursor style
   const cursorClass = isCanvasPanning
@@ -701,7 +747,10 @@ export function MapCanvas({
           const isOpen = openNodeIds.has(node.id);
           const isNodeSelected = selectedNodeId === node.id;
           const isNodeHighlighted = highlightedNodeIds.has(node.id);
-          const isDimmed = hasSelection && !isNodeHighlighted && !isNodeSelected;
+          const matchedFilesCount = nodeMatchCounts.get(node.id) || 0;
+          const isCategoryFiltered = Boolean(selectedCategoryId);
+          const isCategoryDimmed = isCategoryFiltered && matchedFilesCount === 0;
+          const isDimmed = (hasSelection && !isNodeHighlighted && !isNodeSelected) || isCategoryDimmed;
           const isBeingDragged = draggedNodeId === node.id;
 
           const pos = getNodePos(node);
@@ -729,6 +778,7 @@ export function MapCanvas({
                 <OpenPanelComponent
                   node={node}
                   selectedFilePath={selectedFilePath}
+                  selectedCategoryId={selectedCategoryId}
                   isSelectedNode={isNodeSelected}
                   isDimmed={isDimmed}
                   onClose={() => toggleNodeOpen(node.id)}
@@ -746,6 +796,8 @@ export function MapCanvas({
                   node={node}
                   isSelected={isNodeSelected}
                   isDimmed={isDimmed}
+                  selectedCategoryId={selectedCategoryId}
+                  matchedFilesCount={matchedFilesCount}
                   onClick={(e) => {
                     if (isSpacePressedRef.current) return;
                     e.stopPropagation();
