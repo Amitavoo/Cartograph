@@ -24,6 +24,8 @@ interface MapCanvasProps {
   onSelectNode: (nodeId: string | null) => void;
   onSelectFile: (file: ParsedFile | null) => void;
   onUpdateData?: (newData: ParserOutput) => void;
+  hoveredNeighbourPath?: string | null;
+  onHoverPath?: (path: string | null) => void;
 }
 
 const MIN_SCALE = 0.15;
@@ -38,6 +40,8 @@ export function MapCanvas({
   onSelectNode,
   onSelectFile,
   onUpdateData,
+  hoveredNeighbourPath,
+  onHoverPath,
 }: MapCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -428,9 +432,9 @@ export function MapCanvas({
     [nodeMap, getNodePos]
   );
 
-  // Compute Active/Dimmed State
+  // Compute Active/Dimmed State (Selection + Bi-directional Hovering)
   const { highlightedNodeIds, highlightedEdgeIds } = useMemo(() => {
-    if (!selectedNodeId && !selectedFilePath) {
+    if (!selectedNodeId && !selectedFilePath && !hoveredNeighbourPath) {
       return {
         highlightedNodeIds: new Set<string>(),
         highlightedEdgeIds: new Set<string>(),
@@ -439,6 +443,28 @@ export function MapCanvas({
 
     const activeNodes = new Set<string>();
     const activeEdges = new Set<string>();
+
+    if (hoveredNeighbourPath) {
+      const parentNode = fileToNodeMap.get(hoveredNeighbourPath) || nodeMap.get(hoveredNeighbourPath)?.id;
+      if (parentNode) activeNodes.add(parentNode);
+
+      rawEdges.forEach((re) => {
+        if (re.source === hoveredNeighbourPath || re.target === hoveredNeighbourPath) {
+          const srcNode = fileToNodeMap.get(re.source);
+          const tgtNode = fileToNodeMap.get(re.target);
+          if (srcNode) activeNodes.add(srcNode);
+          if (tgtNode) activeNodes.add(tgtNode);
+          if (srcNode && tgtNode) activeEdges.add(`${srcNode}->${tgtNode}`);
+        }
+      });
+      edges.forEach((e) => {
+        if (e.sourceNodeId === hoveredNeighbourPath || e.targetNodeId === hoveredNeighbourPath) {
+          activeNodes.add(e.sourceNodeId);
+          activeNodes.add(e.targetNodeId);
+          activeEdges.add(e.id);
+        }
+      });
+    }
 
     if (selectedFilePath) {
       const parentNode = fileToNodeMap.get(selectedFilePath);
@@ -468,9 +494,17 @@ export function MapCanvas({
       highlightedNodeIds: activeNodes,
       highlightedEdgeIds: activeEdges,
     };
-  }, [selectedNodeId, selectedFilePath, edges, rawEdges, fileToNodeMap]);
+  }, [
+    selectedNodeId,
+    selectedFilePath,
+    hoveredNeighbourPath,
+    edges,
+    rawEdges,
+    fileToNodeMap,
+    nodeMap,
+  ]);
 
-  const hasSelection = Boolean(selectedNodeId || selectedFilePath);
+  const hasSelection = Boolean(selectedNodeId || selectedFilePath || hoveredNeighbourPath);
 
   // Determine cursor style
   const cursorClass = isCanvasPanning
