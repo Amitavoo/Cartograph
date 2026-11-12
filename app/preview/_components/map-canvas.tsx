@@ -389,6 +389,12 @@ export function MapCanvas({
           return (
             <div
               key={node.id}
+              onWheel={(e) => {
+                if (isOpen) e.stopPropagation();
+              }}
+              onMouseDown={(e) => {
+                if (isOpen) e.stopPropagation();
+              }}
               style={{
                 position: "absolute",
                 left: `${node.x}px`,
@@ -435,3 +441,4 @@ export function MapCanvas({
     </div>
   );
 }
+

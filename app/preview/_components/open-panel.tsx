@@ -20,7 +20,6 @@ interface OpenPanelProps {
   onClose: () => void;
   onSelectNode: () => void;
   onSelectFile: (file: ParsedFile, e: React.MouseEvent) => void;
-  maxVisibleRows?: number;
 }
 
 export function OpenPanelComponent({
@@ -31,14 +30,12 @@ export function OpenPanelComponent({
   onClose,
   onSelectNode,
   onSelectFile,
-  maxVisibleRows = 8,
 }: OpenPanelProps) {
-  const visibleFiles = node.files.slice(0, maxVisibleRows);
-  const overflowCount = Math.max(0, node.files.length - maxVisibleRows);
-
   return (
     <div
-      style={{ width: "300px" }}
+      style={{ width: "320px" }}
+      onMouseDown={(e) => e.stopPropagation()}
+      onWheel={(e) => e.stopPropagation()}
       className={`rounded-xl border shadow-2xl backdrop-blur-md overflow-hidden flex flex-col transition-all duration-200 select-none ${
         isSelectedNode
           ? "border-blue-500 bg-zinc-900 ring-2 ring-blue-500/50 shadow-blue-500/20"
@@ -91,9 +88,12 @@ export function OpenPanelComponent({
         </span>
       </div>
 
-      {/* 3. File Rows List (Rows are selectable, with anchor points for edges) */}
-      <div className="p-1.5 space-y-0.5 max-h-72 overflow-y-auto">
-        {visibleFiles.map((file) => {
+      {/* 3. Fully Scrollable File Rows List */}
+      <div
+        onWheel={(e) => e.stopPropagation()}
+        className="p-1.5 space-y-0.5 max-h-80 overflow-y-auto overscroll-contain pr-1 custom-scrollbar"
+      >
+        {node.files.map((file) => {
           const isFileSelected = selectedFilePath === file.path;
           return (
             <div
@@ -143,14 +143,15 @@ export function OpenPanelComponent({
             </div>
           );
         })}
-
-        {/* 4. Overflow Indicator: says how many more rather than growing without limit */}
-        {overflowCount > 0 && (
-          <div className="py-1.5 px-3 text-center text-[10px] font-mono text-zinc-400 bg-zinc-950/40 border border-zinc-800/60 rounded-md my-1">
-            + {overflowCount} more files in this directory
-          </div>
-        )}
       </div>
+
+      {/* 4. Panel Footer: Total files & scroll prompt if large */}
+      {node.files.length > 8 && (
+        <div className="px-3 py-1.5 bg-zinc-950/80 border-t border-zinc-800/80 text-center text-[10px] font-mono text-zinc-500 flex items-center justify-between">
+          <span>{node.files.length} total files</span>
+          <span>scrollable</span>
+        </div>
+      )}
     </div>
   );
 }

@@ -38,3 +38,4 @@ export interface FoldingResult {
     minFilesPerNode: number;
   };
 }
+
