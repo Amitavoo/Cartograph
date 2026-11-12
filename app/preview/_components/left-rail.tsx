@@ -55,3 +55,4 @@ export function LeftRail({ categories, totalFiles }: LeftRailProps) {
     </aside>
   );
 }
+

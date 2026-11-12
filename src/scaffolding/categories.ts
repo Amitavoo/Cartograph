@@ -47,3 +47,4 @@ export function deriveCategories(files: ParsedFile[]): FileCategory[] {
     count: meta.count,
   }));
 }
+
