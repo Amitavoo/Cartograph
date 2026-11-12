@@ -90,6 +90,7 @@ export function OpenPanelComponent({
 
       {/* 3. Fully Scrollable File Rows List */}
       <div
+        data-panel-scroll="true"
         onWheel={(e) => e.stopPropagation()}
         className="p-1.5 space-y-0.5 max-h-80 overflow-y-auto overscroll-contain pr-1 custom-scrollbar"
       >

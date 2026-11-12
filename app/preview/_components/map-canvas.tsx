@@ -5,24 +5,14 @@ import { FoldedNode, NodeEdge } from "@/src/folding/types";
 import { ParsedFile, ParserOutput } from "@/src/parser/types";
 import { FoldedNodeComponent } from "./folded-node";
 import { OpenPanelComponent } from "./open-panel";
-import { DropOverlay } from "./drop-overlay";
-import { UploadProgressModal, ProcessingState } from "./upload-progress-modal";
-import {
-  traverseDataTransferItems,
-  processFileListFallback,
-  DroppedFileEntry,
-} from "@/src/utils/file-traversal";
 import {
   ZoomIn,
   ZoomOut,
   Maximize2,
-  FolderOpen,
-  Layers,
-  Sparkles,
-  UploadCloud,
-  FolderUp,
   RotateCcw,
+  Sparkles,
   Hand,
+  MousePointer,
 } from "lucide-react";
 
 interface MapCanvasProps {
@@ -36,7 +26,7 @@ interface MapCanvasProps {
   onUpdateData?: (newData: ParserOutput) => void;
 }
 
-const MIN_SCALE = 0.2;
+const MIN_SCALE = 0.15;
 const MAX_SCALE = 3.0;
 
 export function MapCanvas({
@@ -50,20 +40,6 @@ export function MapCanvas({
   onUpdateData,
 }: MapCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const folderInputRef = useRef<HTMLInputElement>(null);
-  const filesInputRef = useRef<HTMLInputElement>(null);
-
-  // Drag-and-drop state
-  const [isDraggingOver, setIsDraggingOver] = useState(false);
-  const dragCounterRef = useRef(0);
-
-  // Ingestion state modal
-  const [processingState, setProcessingState] = useState<ProcessingState>({
-    isProcessing: false,
-    stage: "traversing",
-    totalFiles: 0,
-    totalFolders: 0,
-  });
 
   // Set of opened folder node IDs
   const [openNodeIds, setOpenNodeIds] = useState<Set<string>>(new Set());
@@ -73,13 +49,13 @@ export function MapCanvas({
   const transformRef = useRef(transform);
   transformRef.current = transform;
 
-  // Spacebar pan mode
+  // Spacebar panning state
   const [isSpacePressed, setIsSpacePressed] = useState(false);
   const isSpacePressedRef = useRef(false);
 
-  // Drag-panning state
-  const [isPanning, setIsPanning] = useState(false);
-  const panStartRef = useRef({ x: 0, y: 0 });
+  // Dragging state
+  const [isDragging, setIsDragging] = useState(false);
+  const dragStart = useRef({ x: 0, y: 0, initialX: 0, initialY: 0 });
 
   // Map of file path to its parent folded node ID
   const fileToNodeMap = useMemo(() => {
@@ -97,28 +73,89 @@ export function MapCanvas({
     return map;
   }, [nodes]);
 
-  // Prevent browser window from opening dropped files anywhere outside canvas
-  useEffect(() => {
-    const preventWindowDrop = (e: DragEvent) => {
-      e.preventDefault();
-    };
-    window.addEventListener("dragover", preventWindowDrop);
-    window.addEventListener("drop", preventWindowDrop);
+  // Fit view calculation
+  const handleFitView = useCallback(() => {
+    if (!containerRef.current || nodes.length === 0) return;
+    const rect = containerRef.current.getBoundingClientRect();
 
-    return () => {
-      window.removeEventListener("dragover", preventWindowDrop);
-      window.removeEventListener("drop", preventWindowDrop);
-    };
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
+
+    nodes.forEach((n) => {
+      minX = Math.min(minX, n.x);
+      maxX = Math.max(maxX, n.x + n.width);
+      minY = Math.min(minY, n.y);
+      maxY = Math.max(maxY, n.y + n.height);
+    });
+
+    const padding = 100;
+    const graphWidth = maxX - minX + padding * 2;
+    const graphHeight = maxY - minY + padding * 2;
+
+    const scaleX = rect.width / graphWidth;
+    const scaleY = rect.height / graphHeight;
+    const scale = Math.max(MIN_SCALE, Math.min(1.0, Math.min(scaleX, scaleY)));
+
+    const x = (rect.width - (maxX - minX) * scale) / 2 - minX * scale;
+    const y = (rect.height - (maxY - minY) * scale) / 2 - minY * scale;
+
+    setTransform({ x: Math.round(x), y: Math.round(y), scale });
+  }, [nodes]);
+
+  // Reset zoom to 100% centered
+  const handleResetZoom = useCallback(() => {
+    if (!containerRef.current) return;
+    const rect = containerRef.current.getBoundingClientRect();
+    const current = transformRef.current;
+
+    // Center of viewport
+    const centerX = rect.width / 2;
+    const centerY = rect.height / 2;
+
+    // Current graph center point in world coordinates
+    const worldCenterX = (centerX - current.x) / current.scale;
+    const worldCenterY = (centerY - current.y) / current.scale;
+
+    const targetScale = 1.0;
+    const newX = centerX - worldCenterX * targetScale;
+    const newY = centerY - worldCenterY * targetScale;
+
+    setTransform({ x: Math.round(newX), y: Math.round(newY), scale: targetScale });
   }, []);
 
-  // Track Spacebar for Figma/Miro-style hold-to-pan
+  // Zoom relative to viewport center (for buttons)
+  const handleZoomStep = useCallback((factor: number) => {
+    if (!containerRef.current) return;
+    const rect = containerRef.current.getBoundingClientRect();
+    const current = transformRef.current;
+
+    const mouseX = rect.width / 2;
+    const mouseY = rect.height / 2;
+
+    const worldX = (mouseX - current.x) / current.scale;
+    const worldY = (mouseY - current.y) / current.scale;
+
+    const newScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, current.scale * factor));
+    const newX = mouseX - worldX * newScale;
+    const newY = mouseY - worldY * newScale;
+
+    setTransform({ x: Math.round(newX), y: Math.round(newY), scale: newScale });
+  }, []);
+
+  // Initial fit view on mount
+  useEffect(() => {
+    handleFitView();
+  }, [handleFitView]);
+
+  // Spacebar pan listener
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (
-        e.code === "Space" &&
-        !isSpacePressedRef.current &&
-        !["INPUT", "TEXTAREA"].includes((e.target as HTMLElement)?.tagName)
-      ) {
+      const activeTag = (document.activeElement?.tagName || "").toLowerCase();
+      if (activeTag === "input" || activeTag === "textarea") return;
+
+      if (e.code === "Space" && !e.repeat) {
         e.preventDefault();
         isSpacePressedRef.current = true;
         setIsSpacePressed(true);
@@ -141,433 +178,178 @@ export function MapCanvas({
     };
   }, []);
 
-  // Process dropped or selected files
-  const processIngestion = async (
-    fileEntries: DroppedFileEntry[],
-    folderCount: number,
-    skippedCount: number,
-    errors: string[] = []
-  ) => {
-    if (fileEntries.length === 0) {
-      setProcessingState({
-        isProcessing: false,
-        stage: "error",
-        totalFiles: 0,
-        totalFolders: 0,
-        errorMessage: "No valid files found in dropped selection.",
-      });
-      return;
-    }
-
-    setProcessingState({
-      isProcessing: true,
-      stage: "parsing",
-      totalFiles: fileEntries.length,
-      totalFolders: folderCount,
-      skippedCount,
-      errors,
-    });
-
-    try {
-      let detectedRepoName = "drag-and-drop-workspace";
-      const sample = fileEntries[0]?.relativePath;
-      if (sample && sample.includes("/")) {
-        detectedRepoName = sample.split("/")[0];
-      }
-
-      const payloads: Array<{ path: string; content: string; size: number }> = [];
-
-      for (const entry of fileEntries) {
-        try {
-          const text = await entry.file.text();
-          payloads.push({
-            path: entry.relativePath,
-            content: text,
-            size: entry.file.size,
-          });
-        } catch {
-          // Skip binary
-        }
-      }
-
-      const res = await fetch("/api/analyze", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          repoName: detectedRepoName,
-          files: payloads,
-        }),
-      });
-
-      const json = await res.json();
-      if (!res.ok || !json.success) {
-        throw new Error(json.error || "Failed to analyze uploaded files");
-      }
-
-      if (onUpdateData) {
-        onUpdateData(json.data);
-      }
-
-      setProcessingState({
-        isProcessing: false,
-        stage: "complete",
-        totalFiles: payloads.length,
-        totalFolders: folderCount,
-        skippedCount,
-      });
-
-      setTimeout(() => {
-        handleFitView();
-      }, 100);
-    } catch (err: any) {
-      console.error("Ingestion failed:", err);
-      setProcessingState({
-        isProcessing: false,
-        stage: "error",
-        totalFiles: fileEntries.length,
-        totalFolders: folderCount,
-        errorMessage: err?.message || "Failed to parse files.",
-      });
-    }
-  };
-
-  // Drag and Drop Handlers
-  const handleDragEnter = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    dragCounterRef.current++;
-    if (e.dataTransfer.items && e.dataTransfer.items.length > 0) {
-      setIsDraggingOver(true);
-    }
-  };
-
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    e.dataTransfer.dropEffect = "copy";
-  };
-
-  const handleDragLeave = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    dragCounterRef.current--;
-    if (dragCounterRef.current <= 0) {
-      dragCounterRef.current = 0;
-      setIsDraggingOver(false);
-    }
-  };
-
-  const handleDrop = async (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    dragCounterRef.current = 0;
-    setIsDraggingOver(false);
-
-    const items = e.dataTransfer.items;
-    if (!items || items.length === 0) return;
-
-    setProcessingState({
-      isProcessing: true,
-      stage: "traversing",
-      totalFiles: 0,
-      totalFolders: 0,
-    });
-
-    try {
-      const traversal = await traverseDataTransferItems(
-        items,
-        (foundCount, currentFolder) => {
-          setProcessingState((prev) => ({
-            ...prev,
-            totalFiles: foundCount,
-            currentFolder,
-          }));
-        }
-      );
-
-      await processIngestion(
-        traversal.files,
-        traversal.folderCount,
-        traversal.skippedCount,
-        traversal.errors
-      );
-    } catch (err: any) {
-      setProcessingState({
-        isProcessing: false,
-        stage: "error",
-        totalFiles: 0,
-        totalFolders: 0,
-        errorMessage: err?.message || "Error reading dropped items",
-      });
-    }
-  };
-
-  // Manual Upload Handlers
-  const handleManualFolderSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const fileList = e.target.files;
-    if (!fileList || fileList.length === 0) return;
-
-    setProcessingState({
-      isProcessing: true,
-      stage: "traversing",
-      totalFiles: fileList.length,
-      totalFolders: 1,
-    });
-
-    const traversal = processFileListFallback(fileList);
-    await processIngestion(traversal.files, 1, 0);
-  };
-
-  const handleManualFilesSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const fileList = e.target.files;
-    if (!fileList || fileList.length === 0) return;
-
-    setProcessingState({
-      isProcessing: true,
-      stage: "traversing",
-      totalFiles: fileList.length,
-      totalFolders: 0,
-    });
-
-    const traversal = processFileListFallback(fileList);
-    await processIngestion(traversal.files, 0, 0);
-  };
-
-  // Fit View
-  const handleFitView = useCallback(() => {
-    if (!containerRef.current || nodes.length === 0) return;
-    const rect = containerRef.current.getBoundingClientRect();
-
-    let minX = Infinity;
-    let maxX = -Infinity;
-    let minY = Infinity;
-    let maxY = -Infinity;
-
-    nodes.forEach((n) => {
-      minX = Math.min(minX, n.x);
-      maxX = Math.max(maxX, n.x + n.width);
-      minY = Math.min(minY, n.y);
-      maxY = Math.max(maxY, n.y + n.height);
-    });
-
-    const graphWidth = maxX - minX + 180;
-    const graphHeight = maxY - minY + 180;
-
-    const scaleX = rect.width / graphWidth;
-    const scaleY = rect.height / graphHeight;
-    const scale = Math.max(MIN_SCALE, Math.min(1.0, Math.min(scaleX, scaleY)));
-
-    const x = (rect.width - graphWidth * scale) / 2 - minX * scale + 90 * scale;
-    const y = (rect.height - graphHeight * scale) / 2 - minY * scale + 90 * scale;
-
-    setTransform({ x, y, scale });
-  }, [nodes]);
-
-  // Reset Zoom (100% scale)
-  const handleResetZoom = useCallback(() => {
-    if (!containerRef.current || nodes.length === 0) {
-      setTransform({ x: 60, y: 40, scale: 1.0 });
-      return;
-    }
-    const rect = containerRef.current.getBoundingClientRect();
-    const current = transformRef.current;
-
-    // Anchor zoom to canvas center
-    const cx = rect.width / 2;
-    const cy = rect.height / 2;
-    const wx = (cx - current.x) / current.scale;
-    const wy = (cy - current.y) / current.scale;
-
-    const newScale = 1.0;
-    const newX = cx - wx * newScale;
-    const newY = cy - wy * newScale;
-
-    setTransform({ x: newX, y: newY, scale: newScale });
-  }, [nodes]);
-
-  // Zoom relative to cursor helper
-  const zoomAtPoint = useCallback((clientX: number, clientY: number, factor: number) => {
+  // Cursor-anchored wheel & pinch handler
+  const handleCanvasWheel = useCallback((e: WheelEvent) => {
     if (!containerRef.current) return;
     const rect = containerRef.current.getBoundingClientRect();
     const current = transformRef.current;
 
-    const newScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, current.scale * factor));
-    if (newScale === current.scale) return;
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
 
-    // Cursor position relative to canvas
-    const cx = clientX - rect.left;
-    const cy = clientY - rect.top;
+    // Detect pinch zoom (ctrlKey === true) OR mouse wheel zoom
+    const isPinch = e.ctrlKey || e.metaKey;
+    const isHorizontalTrackpad = Math.abs(e.deltaX) > 0;
+    const isNotchedMouseWheel =
+      e.deltaMode === 1 || Math.abs(e.deltaY) >= 50 || e.deltaY % 40 === 0;
 
-    // World coordinate under cursor before zoom
-    const wx = (cx - current.x) / current.scale;
-    const wy = (cy - current.y) / current.scale;
+    if (isPinch || isNotchedMouseWheel) {
+      // Zoom relative to cursor point
+      let zoomFactor: number;
+      if (isPinch) {
+        // Trackpad pinch gesture
+        zoomFactor = Math.pow(1.01, -e.deltaY * 1.5);
+      } else {
+        // Discrete mouse wheel
+        zoomFactor = e.deltaY < 0 ? 1.12 : 0.88;
+      }
 
-    // New translation keeping (wx, wy) fixed under (cx, cy)
-    const newX = cx - wx * newScale;
-    const newY = cy - wy * newScale;
+      const worldX = (mouseX - current.x) / current.scale;
+      const worldY = (mouseY - current.y) / current.scale;
 
-    setTransform({ x: newX, y: newY, scale: newScale });
+      const newScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, current.scale * zoomFactor));
+      const newX = mouseX - worldX * newScale;
+      const newY = mouseY - worldY * newScale;
+
+      setTransform({ x: newX, y: newY, scale: newScale });
+    } else {
+      // Two-finger trackpad pan (smooth scrolling)
+      setTransform({
+        x: current.x - e.deltaX,
+        y: current.y - e.deltaY,
+        scale: current.scale,
+      });
+    }
   }, []);
 
-  // Zoom in / out buttons (anchored to canvas center)
-  const handleZoomIn = () => {
-    if (!containerRef.current) return;
-    const rect = containerRef.current.getBoundingClientRect();
-    zoomAtPoint(rect.left + rect.width / 2, rect.top + rect.height / 2, 1.2);
-  };
-
-  const handleZoomOut = () => {
-    if (!containerRef.current) return;
-    const rect = containerRef.current.getBoundingClientRect();
-    zoomAtPoint(rect.left + rect.width / 2, rect.top + rect.height / 2, 0.83);
-  };
-
-  // Native Wheel & Gesture Event Listener (with passive: false to prevent browser page zoom)
+  // Attach non-passive wheel event listener specifically to canvas container
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
-    const handleNativeWheel = (e: WheelEvent) => {
-      // If pointer is inside a panel's scrollable list, allow natural scroll
-      const isInsideScrollable = (e.target as HTMLElement)?.closest(".overflow-y-auto");
-      if (isInsideScrollable) {
+    const onWheel = (e: WheelEvent) => {
+      // Check if wheel occurred inside an internal scrollable list (e.g. open panel files)
+      const target = e.target as HTMLElement | null;
+      if (target && target.closest(".custom-scrollbar, [data-panel-scroll='true']")) {
+        // Allow inner scroll
         return;
       }
 
-      // Prevent default page scrolling or page zoom
+      // Prevent default page scroll and browser zoom
       e.preventDefault();
-
-      const rect = container.getBoundingClientRect();
-
-      // Case 1: Laptop trackpad pinch gesture (e.ctrlKey === true)
-      if (e.ctrlKey || e.metaKey) {
-        const delta = -e.deltaY * 0.015;
-        const factor = Math.exp(delta);
-        zoomAtPoint(e.clientX, e.clientY, factor);
-        return;
-      }
-
-      // Case 2: Laptop two-finger trackpad panning (horizontal delta present or shift held)
-      if (Math.abs(e.deltaX) > 0 || e.shiftKey) {
-        setTransform((prev) => ({
-          ...prev,
-          x: prev.x - e.deltaX,
-          y: prev.y - e.deltaY,
-        }));
-        return;
-      }
-
-      // Case 3: Mouse Wheel Zoom (or trackpad vertical scroll)
-      // Scrolling wheel upward zooms in; downward zooms out. Anchored to cursor!
-      const factor = e.deltaY < 0 ? 1.12 : 0.89;
-      zoomAtPoint(e.clientX, e.clientY, factor);
+      handleCanvasWheel(e);
     };
 
-    container.addEventListener("wheel", handleNativeWheel, { passive: false });
-
+    container.addEventListener("wheel", onWheel, { passive: false });
     return () => {
-      container.removeEventListener("wheel", handleNativeWheel);
+      container.removeEventListener("wheel", onWheel);
     };
-  }, [zoomAtPoint]);
+  }, [handleCanvasWheel]);
 
-  // Initial fit view on mount
-  useEffect(() => {
-    handleFitView();
-  }, [handleFitView]);
-
-  // Mouse drag panning handlers
+  // Mouse pan handlers (Middle-click, Space+Click, Left-drag on canvas background)
   const handleMouseDown = (e: React.MouseEvent) => {
-    // Support left-click drag, middle-click drag, or Space + click
-    const isLeftClick = e.button === 0;
+    // Middle click (button 1) OR Left click (button 0) with spacebar OR background click
     const isMiddleClick = e.button === 1;
+    const isSpaceClick = e.button === 0 && isSpacePressedRef.current;
+    const isBackgroundClick =
+      e.button === 0 &&
+      (e.target === containerRef.current ||
+        (e.target as HTMLElement).tagName === "svg" ||
+        (e.target as HTMLElement).classList.contains("canvas-stage-bg"));
 
-    if (!isLeftClick && !isMiddleClick) return;
+    if (isMiddleClick || isSpaceClick || isBackgroundClick) {
+      e.preventDefault();
+      setIsDragging(true);
+      dragStart.current = {
+        x: e.clientX,
+        y: e.clientY,
+        initialX: transformRef.current.x,
+        initialY: transformRef.current.y,
+      };
+    }
+  };
 
-    // If clicking on an interactive node or panel, let it handle its own clicks
-    const isInteractive = (e.target as HTMLElement)?.closest(".cursor-pointer, input, button");
-    if (isInteractive && !isSpacePressedRef.current && !isMiddleClick) {
-      return;
+  useEffect(() => {
+    const handleWindowMouseMove = (e: MouseEvent) => {
+      if (!isDragging) return;
+      const dx = e.clientX - dragStart.current.x;
+      const dy = e.clientY - dragStart.current.y;
+      setTransform((prev) => ({
+        ...prev,
+        x: dragStart.current.initialX + dx,
+        y: dragStart.current.initialY + dy,
+      }));
+    };
+
+    const handleWindowMouseUp = (e: MouseEvent) => {
+      if (isDragging) {
+        setIsDragging(false);
+      }
+    };
+
+    if (isDragging) {
+      window.addEventListener("mousemove", handleWindowMouseMove);
+      window.addEventListener("mouseup", handleWindowMouseUp);
     }
 
-    e.preventDefault();
-    setIsPanning(true);
-    panStartRef.current = {
-      x: e.clientX - transformRef.current.x,
-      y: e.clientY - transformRef.current.y,
+    return () => {
+      window.removeEventListener("mousemove", handleWindowMouseMove);
+      window.removeEventListener("mouseup", handleWindowMouseUp);
     };
-  };
-
-  const handleMouseMove = (e: React.MouseEvent) => {
-    if (!isPanning) return;
-    setTransform((prev) => ({
-      ...prev,
-      x: e.clientX - panStartRef.current.x,
-      y: e.clientY - panStartRef.current.y,
-    }));
-  };
-
-  const handleMouseUp = () => {
-    setIsPanning(false);
-  };
+  }, [isDragging]);
 
   // Toggle open/closed panel
-  const toggleNodeOpen = useCallback(
-    (nodeId: string) => {
-      setOpenNodeIds((prev) => {
-        const next = new Set(prev);
-        const wasOpen = next.has(nodeId);
+  const toggleNodeOpen = useCallback((nodeId: string) => {
+    setOpenNodeIds((prev) => {
+      const next = new Set(prev);
+      const wasOpen = next.has(nodeId);
 
-        if (wasOpen) {
-          next.delete(nodeId);
-        } else {
-          next.add(nodeId);
+      if (wasOpen) {
+        next.delete(nodeId);
+      } else {
+        next.add(nodeId);
 
-          // Refit rule: Opening a folder refits view so new panel is visible, only ever zooming out
-          setTimeout(() => {
-            if (containerRef.current) {
-              const rect = containerRef.current.getBoundingClientRect();
-              const targetNode = nodeMap.get(nodeId);
-              if (targetNode) {
-                setTransform((current) => {
-                  const panelWidth = 320;
-                  const panelHeight = 360;
-                  const nodeScreenX = targetNode.x * current.scale + current.x;
-                  const nodeScreenY = targetNode.y * current.scale + current.y;
+        // Refit rule: "Opening a folder refits the view so the new panel is visible.
+        // Refitting on open may only ever zoom out, never in."
+        setTimeout(() => {
+          if (containerRef.current) {
+            const rect = containerRef.current.getBoundingClientRect();
+            const targetNode = nodeMap.get(nodeId);
+            if (targetNode) {
+              setTransform((current) => {
+                const panelWidth = 320;
+                const panelHeight = 360;
+                const nodeScreenX = targetNode.x * current.scale + current.x;
+                const nodeScreenY = targetNode.y * current.scale + current.y;
 
-                  let newScale = current.scale;
-                  let newX = current.x;
-                  let newY = current.y;
+                let newScale = current.scale;
+                let newX = current.x;
+                let newY = current.y;
 
-                  if (
-                    nodeScreenX + panelWidth * current.scale > rect.width - 40 ||
-                    nodeScreenY + panelHeight * current.scale > rect.height - 40 ||
-                    nodeScreenX < 40 ||
-                    nodeScreenY < 40
-                  ) {
-                    const zoomFactor = Math.min(
-                      1,
-                      (rect.width * 0.8) /
-                        (panelWidth + Math.abs(targetNode.x - rect.width / 2)),
-                      (rect.height * 0.8) /
-                        (panelHeight + Math.abs(targetNode.y - rect.height / 2))
-                    );
-                    newScale = Math.min(
-                      current.scale,
-                      Math.max(MIN_SCALE, current.scale * zoomFactor)
-                    );
-                  }
+                if (
+                  nodeScreenX + panelWidth * current.scale > rect.width - 40 ||
+                  nodeScreenY + panelHeight * current.scale > rect.height - 40 ||
+                  nodeScreenX < 40 ||
+                  nodeScreenY < 40
+                ) {
+                  // Only ever zoom out, never in
+                  const zoomFactor = Math.min(
+                    1,
+                    (rect.width * 0.8) / (panelWidth + Math.abs(targetNode.x - rect.width / 2)),
+                    (rect.height * 0.8) / (panelHeight + Math.abs(targetNode.y - rect.height / 2))
+                  );
+                  newScale = Math.min(current.scale, Math.max(MIN_SCALE, current.scale * zoomFactor));
+                }
 
-                  return { x: newX, y: newY, scale: newScale };
-                });
-              }
+                return { x: newX, y: newY, scale: newScale };
+              });
             }
-          }, 50);
-        }
-        return next;
-      });
-    },
-    [nodeMap]
-  );
+          }
+        }, 50);
+      }
+      return next;
+    });
+  }, [nodeMap]);
 
   // Compute Active/Dimmed State
   const { highlightedNodeIds, highlightedEdgeIds } = useMemo(() => {
@@ -613,8 +395,8 @@ export function MapCanvas({
 
   const hasSelection = Boolean(selectedNodeId || selectedFilePath);
 
-  // Cursor style based on interaction
-  const canvasCursorClass = isPanning
+  // Determine cursor style
+  const cursorClass = isDragging
     ? "cursor-grabbing"
     : isSpacePressed
     ? "cursor-grab"
@@ -624,145 +406,93 @@ export function MapCanvas({
     <div
       ref={containerRef}
       onMouseDown={handleMouseDown}
-      onMouseMove={handleMouseMove}
-      onMouseUp={handleMouseUp}
-      onMouseLeave={handleMouseUp}
-      onDragEnter={handleDragEnter}
-      onDragOver={handleDragOver}
-      onDragLeave={handleDragLeave}
-      onDrop={handleDrop}
-      className={`flex-1 h-full relative overflow-hidden bg-zinc-950 select-none ${canvasCursorClass}`}
+      className={`flex-1 h-full relative overflow-hidden bg-zinc-950 select-none ${cursorClass}`}
     >
-      {/* 1. Full-Canvas Drag Overlay */}
-      <DropOverlay isVisible={isDraggingOver} />
-
-      {/* 2. Ingestion Progress & Status Modal */}
-      <UploadProgressModal
-        state={processingState}
-        onClose={() =>
-          setProcessingState((p) => ({ ...p, isProcessing: false, stage: "complete" }))
-        }
-      />
-
-      {/* 3. Hidden File/Folder Inputs for Manual Upload */}
-      <input
-        type="file"
-        ref={folderInputRef}
-        onChange={handleManualFolderSelect}
-        // @ts-expect-error webkitdirectory is standard in browser engines
-        webkitdirectory=""
-        directory=""
-        multiple
-        className="hidden"
-      />
-      <input
-        type="file"
-        ref={filesInputRef}
-        onChange={handleManualFilesSelect}
-        multiple
-        className="hidden"
-      />
-
-      {/* 4. Canvas Top Status Overlay & Manual Upload Action */}
-      <div className="absolute top-3 left-3 z-20 flex items-center gap-2.5 bg-zinc-900/90 border border-zinc-800 backdrop-blur-md px-3 py-1.5 rounded-lg text-xs shadow-xl pointer-events-auto">
+      {/* 1. Canvas Top Status Overlay */}
+      <div className="absolute top-3 left-3 z-20 flex items-center gap-2.5 bg-zinc-900/90 border border-zinc-800 backdrop-blur-md px-3 py-1.5 rounded-lg text-xs shadow-xl pointer-events-none">
         <span className="flex h-2 w-2 relative">
           <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
           <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
         </span>
         <span className="font-semibold text-zinc-100 flex items-center gap-1.5">
           <Sparkles className="w-3.5 h-3.5 text-blue-400" />
-          <span>Interactive Canvas</span>
+          <span>Infinite Canvas</span>
         </span>
         <span className="text-zinc-700">|</span>
-        <span className="text-zinc-400 font-mono text-[11px] hidden sm:inline">
+        <span className="text-zinc-400 font-mono text-[11px]">
           {nodes.length} folded nodes • {openNodeIds.size} open panels • {edges.length} edges
         </span>
-        <span className="text-zinc-700 hidden sm:inline">|</span>
-
-        {/* Manual Upload Buttons */}
-        <div className="flex items-center gap-1.5">
-          <button
-            type="button"
-            onClick={() => folderInputRef.current?.click()}
-            className="flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium bg-zinc-800 hover:bg-zinc-700 text-zinc-200 transition-colors border border-zinc-700"
-            title="Import an entire folder from disk"
-          >
-            <FolderUp className="w-3 h-3 text-blue-400" />
-            <span>Import Folder</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => filesInputRef.current?.click()}
-            className="flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium bg-zinc-800 hover:bg-zinc-700 text-zinc-200 transition-colors border border-zinc-700"
-            title="Import files from disk"
-          >
-            <UploadCloud className="w-3 h-3 text-emerald-400" />
-            <span>Files</span>
-          </button>
-        </div>
       </div>
 
-      {/* 5. Floating Zoom & Navigation Controls */}
-      <div className="absolute bottom-4 right-4 z-20 flex items-center gap-1 bg-zinc-900/95 border border-zinc-800 backdrop-blur-md p-1 rounded-lg text-zinc-300 shadow-xl pointer-events-auto">
+      {/* 2. Floating Navigation Controls in Bottom Right */}
+      <div className="absolute bottom-4 right-4 z-20 flex items-center gap-1 bg-zinc-900/95 border border-zinc-800 backdrop-blur-md p-1.5 rounded-xl text-zinc-300 shadow-2xl">
         <button
           type="button"
-          onClick={handleZoomIn}
-          className="p-1.5 rounded hover:bg-zinc-800 hover:text-white transition-colors"
-          title="Zoom In (Scroll Up or Pinch)"
+          onClick={() => handleZoomStep(1.15)}
+          className="p-1.5 rounded-lg hover:bg-zinc-800 hover:text-white transition-colors"
+          title="Zoom In (Scroll Up / Pinch Out)"
         >
           <ZoomIn className="w-4 h-4" />
         </button>
+
         <button
           type="button"
-          onClick={handleZoomOut}
-          className="p-1.5 rounded hover:bg-zinc-800 hover:text-white transition-colors"
-          title="Zoom Out (Scroll Down or Pinch)"
+          onClick={() => handleZoomStep(0.85)}
+          className="p-1.5 rounded-lg hover:bg-zinc-800 hover:text-white transition-colors"
+          title="Zoom Out (Scroll Down / Pinch In)"
         >
           <ZoomOut className="w-4 h-4" />
         </button>
-        <div className="w-px h-4 bg-zinc-800" />
+
+        <div className="w-px h-4 bg-zinc-800 mx-0.5" />
+
         <button
           type="button"
           onClick={handleResetZoom}
-          className="px-2 py-1 rounded hover:bg-zinc-800 hover:text-white transition-colors text-[10px] font-mono"
+          className="px-2 py-1 rounded-lg text-[11px] font-mono hover:bg-zinc-800 hover:text-white transition-colors"
           title="Reset Zoom to 100%"
         >
           {Math.round(transform.scale * 100)}%
         </button>
-        <div className="w-px h-4 bg-zinc-800" />
+
+        <div className="w-px h-4 bg-zinc-800 mx-0.5" />
+
         <button
           type="button"
           onClick={handleFitView}
-          className="p-1.5 rounded hover:bg-zinc-800 hover:text-white transition-colors"
-          title="Fit Entire Graph to View"
+          className="p-1.5 rounded-lg hover:bg-zinc-800 hover:text-white transition-colors"
+          title="Fit Graph to Viewport"
         >
           <Maximize2 className="w-4 h-4" />
         </button>
       </div>
 
-      {/* 6. Spacebar Pan Mode Indicator */}
-      {isSpacePressed && (
-        <div className="absolute bottom-4 left-4 z-20 flex items-center gap-1.5 bg-blue-600/90 text-white border border-blue-400/40 backdrop-blur-md px-2.5 py-1 rounded-md text-xs font-medium shadow-lg animate-in fade-in duration-150">
-          <Hand className="w-3.5 h-3.5" />
-          <span>Pan Mode Active (Drag to navigate)</span>
-        </div>
-      )}
+      {/* Navigation Mode Hint Badge in Bottom Left */}
+      <div className="absolute bottom-4 left-4 z-20 hidden md:flex items-center gap-2 bg-zinc-900/80 border border-zinc-800/80 backdrop-blur-sm px-2.5 py-1 rounded-lg text-[10px] font-mono text-zinc-500 pointer-events-none">
+        <span className="flex items-center gap-1">
+          <Hand className="w-3 h-3 text-zinc-400" /> Space + Drag / Middle Click to Pan
+        </span>
+        <span>•</span>
+        <span>Wheel / Pinch to Zoom</span>
+      </div>
 
-      {/* 7. Infinite Viewport Stage */}
+      {/* 3. Grid Pattern Background */}
       <div
-        className="absolute inset-0 pointer-events-none"
+        className="absolute inset-0 pointer-events-none canvas-stage-bg"
         style={{
           backgroundImage: `radial-gradient(rgba(255, 255, 255, 0.08) 1px, transparent 1px)`,
-          backgroundSize: "28px 28px",
-          transform: `translate(${transform.x % 28}px, ${transform.y % 28}px)`,
+          backgroundSize: `${Math.round(28 * transform.scale)}px ${Math.round(28 * transform.scale)}px`,
+          backgroundPosition: `${transform.x}px ${transform.y}px`,
         }}
       />
 
+      {/* 4. Unified Scaled World Layer */}
       <div
         className="w-full h-full relative"
         style={{
-          transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`,
+          transform: `translate3d(${transform.x}px, ${transform.y}px, 0) scale(${transform.scale})`,
           transformOrigin: "0 0",
+          willChange: "transform",
         }}
       >
         {/* SVG Edges Layer */}
@@ -850,7 +580,11 @@ export function MapCanvas({
                 if (isOpen) e.stopPropagation();
               }}
               onMouseDown={(e) => {
-                if (isOpen) e.stopPropagation();
+                if (isSpacePressedRef.current || e.button === 1) {
+                  // Allow pan when space is pressed or middle clicked
+                  return;
+                }
+                e.stopPropagation();
               }}
               style={{
                 position: "absolute",
@@ -881,11 +615,13 @@ export function MapCanvas({
                   isSelected={isNodeSelected}
                   isDimmed={isDimmed}
                   onClick={(e) => {
+                    if (isSpacePressedRef.current) return;
                     e.stopPropagation();
                     onSelectNode(node.id);
                     onSelectFile(null);
                   }}
                   onOpen={(e) => {
+                    if (isSpacePressedRef.current) return;
                     e.stopPropagation();
                     toggleNodeOpen(node.id);
                   }}
