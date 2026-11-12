@@ -34,21 +34,19 @@ export function OpenPanelComponent({
   return (
     <div
       style={{ width: "320px" }}
-      onMouseDown={(e) => e.stopPropagation()}
       onWheel={(e) => e.stopPropagation()}
-      className={`rounded-xl border shadow-2xl backdrop-blur-md overflow-hidden flex flex-col transition-all duration-200 select-none ${
+      className={`rounded-xl border shadow-2xl backdrop-blur-md overflow-hidden flex flex-col transition-shadow duration-200 select-none ${
         isSelectedNode
           ? "border-blue-500 bg-zinc-900 ring-2 ring-blue-500/50 shadow-blue-500/20"
           : "border-zinc-700 bg-zinc-900/95 hover:border-zinc-500"
       } ${isDimmed ? "opacity-20 pointer-events-none scale-95" : "opacity-100 scale-100"}`}
     >
-      {/* 1. Panel Header (Clicking closes back to single node) */}
+      {/* 1. Panel Header (Drag to move panel, click collapse button to close) */}
       <div
-        onClick={onClose}
-        className="p-3 border-b border-zinc-800 bg-zinc-800/80 hover:bg-zinc-800 cursor-pointer flex items-center justify-between transition-colors group"
-        title="Click header to collapse panel back to folded node"
+        className="p-3 border-b border-zinc-800 bg-zinc-800/80 hover:bg-zinc-800 cursor-grab active:cursor-grabbing flex items-center justify-between transition-colors group"
+        title="Drag header to move panel across canvas"
       >
-        <div className="flex items-center gap-2 min-w-0">
+        <div className="flex items-center gap-2 min-w-0 pointer-events-none">
           <div className="w-6 h-6 rounded-md bg-blue-500/20 border border-blue-500/40 text-blue-400 flex items-center justify-center shrink-0">
             <FolderOpen className="w-3.5 h-3.5" />
           </div>
@@ -63,12 +61,21 @@ export function OpenPanelComponent({
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
-          <span className="text-[10px] font-mono font-medium px-1.5 py-0.5 rounded bg-zinc-900 text-zinc-300 border border-zinc-700">
+          <span className="text-[10px] font-mono font-medium px-1.5 py-0.5 rounded bg-zinc-900 text-zinc-300 border border-zinc-700 pointer-events-none">
             {node.fileCount} files
           </span>
-          <div className="p-1 rounded text-zinc-400 hover:text-zinc-100 hover:bg-zinc-700 transition-colors">
+          <button
+            type="button"
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              onClose();
+            }}
+            title="Collapse panel back to folded node"
+            className="p-1 rounded text-zinc-400 hover:text-zinc-100 hover:bg-zinc-700 transition-colors"
+          >
             <ChevronDown className="w-4 h-4" />
-          </div>
+          </button>
         </div>
       </div>
 

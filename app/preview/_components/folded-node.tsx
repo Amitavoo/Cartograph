@@ -26,7 +26,7 @@ export function FoldedNodeComponent({
         width: `${node.width}px`,
         height: `${node.height}px`,
       }}
-      className={`group relative rounded-xl border p-3 flex flex-col justify-between cursor-pointer transition-all duration-200 select-none ${
+      className={`group relative rounded-xl border p-3 flex flex-col justify-between cursor-grab active:cursor-grabbing transition-shadow duration-200 select-none ${
         isSelected
           ? "border-blue-500 bg-blue-950/40 shadow-lg shadow-blue-500/20 ring-1 ring-blue-500"
           : "border-zinc-800 bg-zinc-900/90 hover:border-zinc-600 hover:bg-zinc-800/90 hover:shadow-md"
@@ -52,6 +52,7 @@ export function FoldedNodeComponent({
         {/* Click to open panel button */}
         <button
           type="button"
+          onMouseDown={(e) => e.stopPropagation()}
           onClick={(e) => {
             e.stopPropagation();
             onOpen(e);

@@ -12,7 +12,7 @@ import {
   RotateCcw,
   Sparkles,
   Hand,
-  MousePointer,
+  Move,
 } from "lucide-react";
 
 interface MapCanvasProps {
@@ -49,13 +49,40 @@ export function MapCanvas({
   const transformRef = useRef(transform);
   transformRef.current = transform;
 
+  // Dynamic node position overrides (allows moving any node or panel to the side)
+  const [nodePositions, setNodePositions] = useState<Map<string, { x: number; y: number }>>(
+    new Map()
+  );
+
+  const getNodePos = useCallback(
+    (node: FoldedNode) => {
+      const pos = nodePositions.get(node.id);
+      return pos || { x: node.x, y: node.y };
+    },
+    [nodePositions]
+  );
+
   // Spacebar panning state
   const [isSpacePressed, setIsSpacePressed] = useState(false);
   const isSpacePressedRef = useRef(false);
 
-  // Dragging state
-  const [isDragging, setIsDragging] = useState(false);
-  const dragStart = useRef({ x: 0, y: 0, initialX: 0, initialY: 0 });
+  // Canvas background panning state
+  const [isCanvasPanning, setIsCanvasPanning] = useState(false);
+  const canvasPanStart = useRef({ x: 0, y: 0, initialX: 0, initialY: 0 });
+
+  // Node dragging state
+  const [draggedNodeId, setDraggedNodeId] = useState<string | null>(null);
+  const nodeDragStartRef = useRef<{
+    startX: number;
+    startY: number;
+    initialNodePos: { x: number; y: number };
+    hasMoved: boolean;
+  }>({
+    startX: 0,
+    startY: 0,
+    initialNodePos: { x: 0, y: 0 },
+    hasMoved: false,
+  });
 
   // Map of file path to its parent folded node ID
   const fileToNodeMap = useMemo(() => {
@@ -73,7 +100,7 @@ export function MapCanvas({
     return map;
   }, [nodes]);
 
-  // Fit view calculation
+  // Fit view calculation based on current node positions
   const handleFitView = useCallback(() => {
     if (!containerRef.current || nodes.length === 0) return;
     const rect = containerRef.current.getBoundingClientRect();
@@ -84,10 +111,11 @@ export function MapCanvas({
     let maxY = -Infinity;
 
     nodes.forEach((n) => {
-      minX = Math.min(minX, n.x);
-      maxX = Math.max(maxX, n.x + n.width);
-      minY = Math.min(minY, n.y);
-      maxY = Math.max(maxY, n.y + n.height);
+      const pos = getNodePos(n);
+      minX = Math.min(minX, pos.x);
+      maxX = Math.max(maxX, pos.x + n.width);
+      minY = Math.min(minY, pos.y);
+      maxY = Math.max(maxY, pos.y + n.height);
     });
 
     const padding = 100;
@@ -102,7 +130,7 @@ export function MapCanvas({
     const y = (rect.height - (maxY - minY) * scale) / 2 - minY * scale;
 
     setTransform({ x: Math.round(x), y: Math.round(y), scale });
-  }, [nodes]);
+  }, [nodes, getNodePos]);
 
   // Reset zoom to 100% centered
   const handleResetZoom = useCallback(() => {
@@ -110,11 +138,9 @@ export function MapCanvas({
     const rect = containerRef.current.getBoundingClientRect();
     const current = transformRef.current;
 
-    // Center of viewport
     const centerX = rect.width / 2;
     const centerY = rect.height / 2;
 
-    // Current graph center point in world coordinates
     const worldCenterX = (centerX - current.x) / current.scale;
     const worldCenterY = (centerY - current.y) / current.scale;
 
@@ -123,6 +149,11 @@ export function MapCanvas({
     const newY = centerY - worldCenterY * targetScale;
 
     setTransform({ x: Math.round(newX), y: Math.round(newY), scale: targetScale });
+  }, []);
+
+  // Reset node positions back to deterministic defaults
+  const handleResetPositions = useCallback(() => {
+    setNodePositions(new Map());
   }, []);
 
   // Zoom relative to viewport center (for buttons)
@@ -187,20 +218,15 @@ export function MapCanvas({
     const mouseX = e.clientX - rect.left;
     const mouseY = e.clientY - rect.top;
 
-    // Detect pinch zoom (ctrlKey === true) OR mouse wheel zoom
     const isPinch = e.ctrlKey || e.metaKey;
-    const isHorizontalTrackpad = Math.abs(e.deltaX) > 0;
     const isNotchedMouseWheel =
       e.deltaMode === 1 || Math.abs(e.deltaY) >= 50 || e.deltaY % 40 === 0;
 
     if (isPinch || isNotchedMouseWheel) {
-      // Zoom relative to cursor point
       let zoomFactor: number;
       if (isPinch) {
-        // Trackpad pinch gesture
         zoomFactor = Math.pow(1.01, -e.deltaY * 1.5);
       } else {
-        // Discrete mouse wheel
         zoomFactor = e.deltaY < 0 ? 1.12 : 0.88;
       }
 
@@ -213,7 +239,6 @@ export function MapCanvas({
 
       setTransform({ x: newX, y: newY, scale: newScale });
     } else {
-      // Two-finger trackpad pan (smooth scrolling)
       setTransform({
         x: current.x - e.deltaX,
         y: current.y - e.deltaY,
@@ -228,14 +253,11 @@ export function MapCanvas({
     if (!container) return;
 
     const onWheel = (e: WheelEvent) => {
-      // Check if wheel occurred inside an internal scrollable list (e.g. open panel files)
       const target = e.target as HTMLElement | null;
       if (target && target.closest(".custom-scrollbar, [data-panel-scroll='true']")) {
-        // Allow inner scroll
         return;
       }
 
-      // Prevent default page scroll and browser zoom
       e.preventDefault();
       handleCanvasWheel(e);
     };
@@ -246,9 +268,25 @@ export function MapCanvas({
     };
   }, [handleCanvasWheel]);
 
-  // Mouse pan handlers (Middle-click, Space+Click, Left-drag on canvas background)
-  const handleMouseDown = (e: React.MouseEvent) => {
-    // Middle click (button 1) OR Left click (button 0) with spacebar OR background click
+  // Handle node drag start
+  const handleNodeMouseDown = (node: FoldedNode, e: React.MouseEvent) => {
+    if (isSpacePressedRef.current || e.button === 1) return;
+
+    if (e.button === 0) {
+      e.stopPropagation();
+      const currentPos = getNodePos(node);
+      nodeDragStartRef.current = {
+        startX: e.clientX,
+        startY: e.clientY,
+        initialNodePos: currentPos,
+        hasMoved: false,
+      };
+      setDraggedNodeId(node.id);
+    }
+  };
+
+  // Canvas background drag start (Middle-click, Space+Click, Left-drag on background)
+  const handleCanvasMouseDown = (e: React.MouseEvent) => {
     const isMiddleClick = e.button === 1;
     const isSpaceClick = e.button === 0 && isSpacePressedRef.current;
     const isBackgroundClick =
@@ -259,8 +297,8 @@ export function MapCanvas({
 
     if (isMiddleClick || isSpaceClick || isBackgroundClick) {
       e.preventDefault();
-      setIsDragging(true);
-      dragStart.current = {
+      setIsCanvasPanning(true);
+      canvasPanStart.current = {
         x: e.clientX,
         y: e.clientY,
         initialX: transformRef.current.x,
@@ -269,87 +307,126 @@ export function MapCanvas({
     }
   };
 
+  // Window mouse move & up listeners for fluid dragging
   useEffect(() => {
     const handleWindowMouseMove = (e: MouseEvent) => {
-      if (!isDragging) return;
-      const dx = e.clientX - dragStart.current.x;
-      const dy = e.clientY - dragStart.current.y;
-      setTransform((prev) => ({
-        ...prev,
-        x: dragStart.current.initialX + dx,
-        y: dragStart.current.initialY + dy,
-      }));
-    };
+      // 1. Move individual dragged node
+      if (draggedNodeId) {
+        const { startX, startY, initialNodePos } = nodeDragStartRef.current;
+        const dist = Math.hypot(e.clientX - startX, e.clientY - startY);
+        if (dist > 3) {
+          nodeDragStartRef.current.hasMoved = true;
+        }
 
-    const handleWindowMouseUp = (e: MouseEvent) => {
-      if (isDragging) {
-        setIsDragging(false);
+        const scale = transformRef.current.scale;
+        const deltaWorldX = (e.clientX - startX) / scale;
+        const deltaWorldY = (e.clientY - startY) / scale;
+
+        setNodePositions((prev) => {
+          const next = new Map(prev);
+          next.set(draggedNodeId, {
+            x: Math.round(initialNodePos.x + deltaWorldX),
+            y: Math.round(initialNodePos.y + deltaWorldY),
+          });
+          return next;
+        });
+        return;
+      }
+
+      // 2. Pan entire canvas
+      if (isCanvasPanning) {
+        const dx = e.clientX - canvasPanStart.current.x;
+        const dy = e.clientY - canvasPanStart.current.y;
+        setTransform((prev) => ({
+          ...prev,
+          x: canvasPanStart.current.initialX + dx,
+          y: canvasPanStart.current.initialY + dy,
+        }));
       }
     };
 
-    if (isDragging) {
-      window.addEventListener("mousemove", handleWindowMouseMove);
-      window.addEventListener("mouseup", handleWindowMouseUp);
-    }
+    const handleWindowMouseUp = () => {
+      if (draggedNodeId) {
+        const { hasMoved } = nodeDragStartRef.current;
+        if (!hasMoved) {
+          // Simple click without drag: select node
+          onSelectNode(draggedNodeId);
+          onSelectFile(null);
+        }
+        setDraggedNodeId(null);
+      }
+      if (isCanvasPanning) {
+        setIsCanvasPanning(false);
+      }
+    };
+
+    window.addEventListener("mousemove", handleWindowMouseMove);
+    window.addEventListener("mouseup", handleWindowMouseUp);
 
     return () => {
       window.removeEventListener("mousemove", handleWindowMouseMove);
       window.removeEventListener("mouseup", handleWindowMouseUp);
     };
-  }, [isDragging]);
+  }, [draggedNodeId, isCanvasPanning, onSelectNode, onSelectFile]);
 
   // Toggle open/closed panel
-  const toggleNodeOpen = useCallback((nodeId: string) => {
-    setOpenNodeIds((prev) => {
-      const next = new Set(prev);
-      const wasOpen = next.has(nodeId);
+  const toggleNodeOpen = useCallback(
+    (nodeId: string) => {
+      setOpenNodeIds((prev) => {
+        const next = new Set(prev);
+        const wasOpen = next.has(nodeId);
 
-      if (wasOpen) {
-        next.delete(nodeId);
-      } else {
-        next.add(nodeId);
+        if (wasOpen) {
+          next.delete(nodeId);
+        } else {
+          next.add(nodeId);
 
-        // Refit rule: "Opening a folder refits the view so the new panel is visible.
-        // Refitting on open may only ever zoom out, never in."
-        setTimeout(() => {
-          if (containerRef.current) {
-            const rect = containerRef.current.getBoundingClientRect();
-            const targetNode = nodeMap.get(nodeId);
-            if (targetNode) {
-              setTransform((current) => {
-                const panelWidth = 320;
-                const panelHeight = 360;
-                const nodeScreenX = targetNode.x * current.scale + current.x;
-                const nodeScreenY = targetNode.y * current.scale + current.y;
+          setTimeout(() => {
+            if (containerRef.current) {
+              const rect = containerRef.current.getBoundingClientRect();
+              const targetNode = nodeMap.get(nodeId);
+              if (targetNode) {
+                const pos = getNodePos(targetNode);
+                setTransform((current) => {
+                  const panelWidth = 320;
+                  const panelHeight = 360;
+                  const nodeScreenX = pos.x * current.scale + current.x;
+                  const nodeScreenY = pos.y * current.scale + current.y;
 
-                let newScale = current.scale;
-                let newX = current.x;
-                let newY = current.y;
+                  let newScale = current.scale;
+                  let newX = current.x;
+                  let newY = current.y;
 
-                if (
-                  nodeScreenX + panelWidth * current.scale > rect.width - 40 ||
-                  nodeScreenY + panelHeight * current.scale > rect.height - 40 ||
-                  nodeScreenX < 40 ||
-                  nodeScreenY < 40
-                ) {
-                  // Only ever zoom out, never in
-                  const zoomFactor = Math.min(
-                    1,
-                    (rect.width * 0.8) / (panelWidth + Math.abs(targetNode.x - rect.width / 2)),
-                    (rect.height * 0.8) / (panelHeight + Math.abs(targetNode.y - rect.height / 2))
-                  );
-                  newScale = Math.min(current.scale, Math.max(MIN_SCALE, current.scale * zoomFactor));
-                }
+                  if (
+                    nodeScreenX + panelWidth * current.scale > rect.width - 40 ||
+                    nodeScreenY + panelHeight * current.scale > rect.height - 40 ||
+                    nodeScreenX < 40 ||
+                    nodeScreenY < 40
+                  ) {
+                    const zoomFactor = Math.min(
+                      1,
+                      (rect.width * 0.8) /
+                        (panelWidth + Math.abs(pos.x - rect.width / 2)),
+                      (rect.height * 0.8) /
+                        (panelHeight + Math.abs(pos.y - rect.height / 2))
+                    );
+                    newScale = Math.min(
+                      current.scale,
+                      Math.max(MIN_SCALE, current.scale * zoomFactor)
+                    );
+                  }
 
-                return { x: newX, y: newY, scale: newScale };
-              });
+                  return { x: newX, y: newY, scale: newScale };
+                });
+              }
             }
-          }
-        }, 50);
-      }
-      return next;
-    });
-  }, [nodeMap]);
+          }, 50);
+        }
+        return next;
+      });
+    },
+    [nodeMap, getNodePos]
+  );
 
   // Compute Active/Dimmed State
   const { highlightedNodeIds, highlightedEdgeIds } = useMemo(() => {
@@ -396,7 +473,7 @@ export function MapCanvas({
   const hasSelection = Boolean(selectedNodeId || selectedFilePath);
 
   // Determine cursor style
-  const cursorClass = isDragging
+  const cursorClass = isCanvasPanning
     ? "cursor-grabbing"
     : isSpacePressed
     ? "cursor-grab"
@@ -405,7 +482,7 @@ export function MapCanvas({
   return (
     <div
       ref={containerRef}
-      onMouseDown={handleMouseDown}
+      onMouseDown={handleCanvasMouseDown}
       className={`flex-1 h-full relative overflow-hidden bg-zinc-950 select-none ${cursorClass}`}
     >
       {/* 1. Canvas Top Status Overlay */}
@@ -416,11 +493,11 @@ export function MapCanvas({
         </span>
         <span className="font-semibold text-zinc-100 flex items-center gap-1.5">
           <Sparkles className="w-3.5 h-3.5 text-blue-400" />
-          <span>Infinite Canvas</span>
+          <span>Interactive Canvas</span>
         </span>
         <span className="text-zinc-700">|</span>
         <span className="text-zinc-400 font-mono text-[11px]">
-          {nodes.length} folded nodes • {openNodeIds.size} open panels • {edges.length} edges
+          {nodes.length} folded nodes • {openNodeIds.size} open panels • Drag nodes to untangle
         </span>
       </div>
 
@@ -465,15 +542,31 @@ export function MapCanvas({
         >
           <Maximize2 className="w-4 h-4" />
         </button>
+
+        {nodePositions.size > 0 && (
+          <>
+            <div className="w-px h-4 bg-zinc-800 mx-0.5" />
+            <button
+              type="button"
+              onClick={handleResetPositions}
+              className="p-1.5 rounded-lg hover:bg-zinc-800 text-zinc-400 hover:text-amber-400 transition-colors"
+              title="Reset moved nodes back to original layout"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+            </button>
+          </>
+        )}
       </div>
 
       {/* Navigation Mode Hint Badge in Bottom Left */}
       <div className="absolute bottom-4 left-4 z-20 hidden md:flex items-center gap-2 bg-zinc-900/80 border border-zinc-800/80 backdrop-blur-sm px-2.5 py-1 rounded-lg text-[10px] font-mono text-zinc-500 pointer-events-none">
+        <span className="flex items-center gap-1 text-zinc-400">
+          <Move className="w-3 h-3 text-blue-400" /> Drag any node to reposition
+        </span>
+        <span>•</span>
         <span className="flex items-center gap-1">
           <Hand className="w-3 h-3 text-zinc-400" /> Space + Drag / Middle Click to Pan
         </span>
-        <span>•</span>
-        <span>Wheel / Pinch to Zoom</span>
       </div>
 
       {/* 3. Grid Pattern Background */}
@@ -530,6 +623,9 @@ export function MapCanvas({
             const tgt = nodeMap.get(edge.targetNodeId);
             if (!src || !tgt) return null;
 
+            const srcPos = getNodePos(src);
+            const tgtPos = getNodePos(tgt);
+
             const isEdgeActive = highlightedEdgeIds.has(edge.id);
             const isEdgeDimmed = hasSelection && !isEdgeActive;
 
@@ -541,10 +637,10 @@ export function MapCanvas({
             const tgtWidth = isOpenTgt ? 320 : tgt.width;
             const tgtHeight = isOpenTgt ? 280 : tgt.height;
 
-            const x1 = src.x + srcWidth / 2;
-            const y1 = src.y + srcHeight / 2;
-            const x2 = tgt.x + tgtWidth / 2;
-            const y2 = tgt.y + tgtHeight / 2;
+            const x1 = srcPos.x + srcWidth / 2;
+            const y1 = srcPos.y + srcHeight / 2;
+            const x2 = tgtPos.x + tgtWidth / 2;
+            const y2 = tgtPos.y + tgtHeight / 2;
 
             const dx = x2 - x1;
             const dy = y2 - y1;
@@ -560,7 +656,7 @@ export function MapCanvas({
                 strokeWidth={isEdgeActive ? 2.5 : Math.min(2.5, Math.max(1.2, edge.count * 0.4))}
                 markerEnd={isEdgeActive ? "url(#edge-arrow-active)" : "url(#edge-arrow)"}
                 opacity={isEdgeDimmed ? 0.08 : 1}
-                className="transition-all duration-200"
+                className="transition-all duration-75"
               />
             );
           })}
@@ -572,26 +668,28 @@ export function MapCanvas({
           const isNodeSelected = selectedNodeId === node.id;
           const isNodeHighlighted = highlightedNodeIds.has(node.id);
           const isDimmed = hasSelection && !isNodeHighlighted && !isNodeSelected;
+          const isBeingDragged = draggedNodeId === node.id;
+
+          const pos = getNodePos(node);
 
           return (
             <div
               key={node.id}
+              onMouseDown={(e) => handleNodeMouseDown(node, e)}
               onWheel={(e) => {
                 if (isOpen) e.stopPropagation();
               }}
-              onMouseDown={(e) => {
-                if (isSpacePressedRef.current || e.button === 1) {
-                  // Allow pan when space is pressed or middle clicked
-                  return;
-                }
-                e.stopPropagation();
-              }}
               style={{
                 position: "absolute",
-                left: `${node.x}px`,
-                top: `${node.y}px`,
-                zIndex: isOpen ? 30 : isNodeSelected ? 20 : 10,
+                left: `${pos.x}px`,
+                top: `${pos.y}px`,
+                zIndex: isBeingDragged ? 60 : isOpen ? 30 : isNodeSelected ? 20 : 10,
               }}
+              className={`${
+                isBeingDragged
+                  ? "ring-2 ring-blue-500/80 shadow-2xl scale-[1.02]"
+                  : ""
+              }`}
             >
               {isOpen ? (
                 <OpenPanelComponent
