@@ -21,6 +21,8 @@ import {
   Sparkles,
   UploadCloud,
   FolderUp,
+  RotateCcw,
+  Hand,
 } from "lucide-react";
 
 interface MapCanvasProps {
@@ -33,6 +35,9 @@ interface MapCanvasProps {
   onSelectFile: (file: ParsedFile | null) => void;
   onUpdateData?: (newData: ParserOutput) => void;
 }
+
+const MIN_SCALE = 0.2;
+const MAX_SCALE = 3.0;
 
 export function MapCanvas({
   nodes,
@@ -63,10 +68,18 @@ export function MapCanvas({
   // Set of opened folder node IDs
   const [openNodeIds, setOpenNodeIds] = useState<Set<string>>(new Set());
 
-  // Viewport transform state: Pan and Zoom
+  // Viewport transform state: Pan (x, y) and Zoom (scale)
   const [transform, setTransform] = useState({ x: 60, y: 40, scale: 0.85 });
-  const [isDragging, setIsDragging] = useState(false);
-  const dragStart = useRef({ x: 0, y: 0 });
+  const transformRef = useRef(transform);
+  transformRef.current = transform;
+
+  // Spacebar pan mode
+  const [isSpacePressed, setIsSpacePressed] = useState(false);
+  const isSpacePressedRef = useRef(false);
+
+  // Drag-panning state
+  const [isPanning, setIsPanning] = useState(false);
+  const panStartRef = useRef({ x: 0, y: 0 });
 
   // Map of file path to its parent folded node ID
   const fileToNodeMap = useMemo(() => {
@@ -98,6 +111,36 @@ export function MapCanvas({
     };
   }, []);
 
+  // Track Spacebar for Figma/Miro-style hold-to-pan
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (
+        e.code === "Space" &&
+        !isSpacePressedRef.current &&
+        !["INPUT", "TEXTAREA"].includes((e.target as HTMLElement)?.tagName)
+      ) {
+        e.preventDefault();
+        isSpacePressedRef.current = true;
+        setIsSpacePressed(true);
+      }
+    };
+
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.code === "Space") {
+        isSpacePressedRef.current = false;
+        setIsSpacePressed(false);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keyup", handleKeyUp);
+
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", handleKeyUp);
+    };
+  }, []);
+
   // Process dropped or selected files
   const processIngestion = async (
     fileEntries: DroppedFileEntry[],
@@ -126,14 +169,12 @@ export function MapCanvas({
     });
 
     try {
-      // Determine repository name from root directory if available
       let detectedRepoName = "drag-and-drop-workspace";
       const sample = fileEntries[0]?.relativePath;
       if (sample && sample.includes("/")) {
         detectedRepoName = sample.split("/")[0];
       }
 
-      // Read text contents of all files
       const payloads: Array<{ path: string; content: string; size: number }> = [];
 
       for (const entry of fileEntries) {
@@ -145,7 +186,7 @@ export function MapCanvas({
             size: entry.file.size,
           });
         } catch {
-          // Binary or unreadable files can be skipped
+          // Skip binary
         }
       }
 
@@ -175,7 +216,6 @@ export function MapCanvas({
         skippedCount,
       });
 
-      // Refit view for the newly ingested graph
       setTimeout(() => {
         handleFitView();
       }, 100);
@@ -262,7 +302,7 @@ export function MapCanvas({
     }
   };
 
-  // Manual Upload Handlers (Folder & Files)
+  // Manual Upload Handlers
   const handleManualFolderSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const fileList = e.target.files;
     if (!fileList || fileList.length === 0) return;
@@ -293,6 +333,183 @@ export function MapCanvas({
     await processIngestion(traversal.files, 0, 0);
   };
 
+  // Fit View
+  const handleFitView = useCallback(() => {
+    if (!containerRef.current || nodes.length === 0) return;
+    const rect = containerRef.current.getBoundingClientRect();
+
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
+
+    nodes.forEach((n) => {
+      minX = Math.min(minX, n.x);
+      maxX = Math.max(maxX, n.x + n.width);
+      minY = Math.min(minY, n.y);
+      maxY = Math.max(maxY, n.y + n.height);
+    });
+
+    const graphWidth = maxX - minX + 180;
+    const graphHeight = maxY - minY + 180;
+
+    const scaleX = rect.width / graphWidth;
+    const scaleY = rect.height / graphHeight;
+    const scale = Math.max(MIN_SCALE, Math.min(1.0, Math.min(scaleX, scaleY)));
+
+    const x = (rect.width - graphWidth * scale) / 2 - minX * scale + 90 * scale;
+    const y = (rect.height - graphHeight * scale) / 2 - minY * scale + 90 * scale;
+
+    setTransform({ x, y, scale });
+  }, [nodes]);
+
+  // Reset Zoom (100% scale)
+  const handleResetZoom = useCallback(() => {
+    if (!containerRef.current || nodes.length === 0) {
+      setTransform({ x: 60, y: 40, scale: 1.0 });
+      return;
+    }
+    const rect = containerRef.current.getBoundingClientRect();
+    const current = transformRef.current;
+
+    // Anchor zoom to canvas center
+    const cx = rect.width / 2;
+    const cy = rect.height / 2;
+    const wx = (cx - current.x) / current.scale;
+    const wy = (cy - current.y) / current.scale;
+
+    const newScale = 1.0;
+    const newX = cx - wx * newScale;
+    const newY = cy - wy * newScale;
+
+    setTransform({ x: newX, y: newY, scale: newScale });
+  }, [nodes]);
+
+  // Zoom relative to cursor helper
+  const zoomAtPoint = useCallback((clientX: number, clientY: number, factor: number) => {
+    if (!containerRef.current) return;
+    const rect = containerRef.current.getBoundingClientRect();
+    const current = transformRef.current;
+
+    const newScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, current.scale * factor));
+    if (newScale === current.scale) return;
+
+    // Cursor position relative to canvas
+    const cx = clientX - rect.left;
+    const cy = clientY - rect.top;
+
+    // World coordinate under cursor before zoom
+    const wx = (cx - current.x) / current.scale;
+    const wy = (cy - current.y) / current.scale;
+
+    // New translation keeping (wx, wy) fixed under (cx, cy)
+    const newX = cx - wx * newScale;
+    const newY = cy - wy * newScale;
+
+    setTransform({ x: newX, y: newY, scale: newScale });
+  }, []);
+
+  // Zoom in / out buttons (anchored to canvas center)
+  const handleZoomIn = () => {
+    if (!containerRef.current) return;
+    const rect = containerRef.current.getBoundingClientRect();
+    zoomAtPoint(rect.left + rect.width / 2, rect.top + rect.height / 2, 1.2);
+  };
+
+  const handleZoomOut = () => {
+    if (!containerRef.current) return;
+    const rect = containerRef.current.getBoundingClientRect();
+    zoomAtPoint(rect.left + rect.width / 2, rect.top + rect.height / 2, 0.83);
+  };
+
+  // Native Wheel & Gesture Event Listener (with passive: false to prevent browser page zoom)
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const handleNativeWheel = (e: WheelEvent) => {
+      // If pointer is inside a panel's scrollable list, allow natural scroll
+      const isInsideScrollable = (e.target as HTMLElement)?.closest(".overflow-y-auto");
+      if (isInsideScrollable) {
+        return;
+      }
+
+      // Prevent default page scrolling or page zoom
+      e.preventDefault();
+
+      const rect = container.getBoundingClientRect();
+
+      // Case 1: Laptop trackpad pinch gesture (e.ctrlKey === true)
+      if (e.ctrlKey || e.metaKey) {
+        const delta = -e.deltaY * 0.015;
+        const factor = Math.exp(delta);
+        zoomAtPoint(e.clientX, e.clientY, factor);
+        return;
+      }
+
+      // Case 2: Laptop two-finger trackpad panning (horizontal delta present or shift held)
+      if (Math.abs(e.deltaX) > 0 || e.shiftKey) {
+        setTransform((prev) => ({
+          ...prev,
+          x: prev.x - e.deltaX,
+          y: prev.y - e.deltaY,
+        }));
+        return;
+      }
+
+      // Case 3: Mouse Wheel Zoom (or trackpad vertical scroll)
+      // Scrolling wheel upward zooms in; downward zooms out. Anchored to cursor!
+      const factor = e.deltaY < 0 ? 1.12 : 0.89;
+      zoomAtPoint(e.clientX, e.clientY, factor);
+    };
+
+    container.addEventListener("wheel", handleNativeWheel, { passive: false });
+
+    return () => {
+      container.removeEventListener("wheel", handleNativeWheel);
+    };
+  }, [zoomAtPoint]);
+
+  // Initial fit view on mount
+  useEffect(() => {
+    handleFitView();
+  }, [handleFitView]);
+
+  // Mouse drag panning handlers
+  const handleMouseDown = (e: React.MouseEvent) => {
+    // Support left-click drag, middle-click drag, or Space + click
+    const isLeftClick = e.button === 0;
+    const isMiddleClick = e.button === 1;
+
+    if (!isLeftClick && !isMiddleClick) return;
+
+    // If clicking on an interactive node or panel, let it handle its own clicks
+    const isInteractive = (e.target as HTMLElement)?.closest(".cursor-pointer, input, button");
+    if (isInteractive && !isSpacePressedRef.current && !isMiddleClick) {
+      return;
+    }
+
+    e.preventDefault();
+    setIsPanning(true);
+    panStartRef.current = {
+      x: e.clientX - transformRef.current.x,
+      y: e.clientY - transformRef.current.y,
+    };
+  };
+
+  const handleMouseMove = (e: React.MouseEvent) => {
+    if (!isPanning) return;
+    setTransform((prev) => ({
+      ...prev,
+      x: e.clientX - panStartRef.current.x,
+      y: e.clientY - panStartRef.current.y,
+    }));
+  };
+
+  const handleMouseUp = () => {
+    setIsPanning(false);
+  };
+
   // Toggle open/closed panel
   const toggleNodeOpen = useCallback(
     (nodeId: string) => {
@@ -305,8 +522,7 @@ export function MapCanvas({
         } else {
           next.add(nodeId);
 
-          // Refit rule: "Opening a folder refits the view so the new panel is visible.
-          // Refitting on open may only ever zoom out, never in."
+          // Refit rule: Opening a folder refits view so new panel is visible, only ever zooming out
           setTimeout(() => {
             if (containerRef.current) {
               const rect = containerRef.current.getBoundingClientRect();
@@ -337,7 +553,7 @@ export function MapCanvas({
                     );
                     newScale = Math.min(
                       current.scale,
-                      Math.max(0.4, current.scale * zoomFactor)
+                      Math.max(MIN_SCALE, current.scale * zoomFactor)
                     );
                   }
 
@@ -352,71 +568,6 @@ export function MapCanvas({
     },
     [nodeMap]
   );
-
-  // Fit view calculation
-  const handleFitView = useCallback(() => {
-    if (!containerRef.current || nodes.length === 0) return;
-    const rect = containerRef.current.getBoundingClientRect();
-
-    let minX = Infinity;
-    let maxX = -Infinity;
-    let minY = Infinity;
-    let maxY = -Infinity;
-
-    nodes.forEach((n) => {
-      minX = Math.min(minX, n.x);
-      maxX = Math.max(maxX, n.x + n.width);
-      minY = Math.min(minY, n.y);
-      maxY = Math.max(maxY, n.y + n.height);
-    });
-
-    const graphWidth = maxX - minX + 160;
-    const graphHeight = maxY - minY + 160;
-
-    const scaleX = rect.width / graphWidth;
-    const scaleY = rect.height / graphHeight;
-    const scale = Math.max(0.4, Math.min(1.0, Math.min(scaleX, scaleY)));
-
-    const x = (rect.width - graphWidth * scale) / 2 - minX * scale + 80 * scale;
-    const y = (rect.height - graphHeight * scale) / 2 - minY * scale + 80 * scale;
-
-    setTransform({ x, y, scale });
-  }, [nodes]);
-
-  // Initial fit view on mount
-  useEffect(() => {
-    handleFitView();
-  }, [handleFitView]);
-
-  // Pan interactions
-  const handleMouseDown = (e: React.MouseEvent) => {
-    if (e.button !== 0) return;
-    setIsDragging(true);
-    dragStart.current = { x: e.clientX - transform.x, y: e.clientY - transform.y };
-  };
-
-  const handleMouseMove = (e: React.MouseEvent) => {
-    if (!isDragging) return;
-    setTransform((prev) => ({
-      ...prev,
-      x: e.clientX - dragStart.current.x,
-      y: e.clientY - dragStart.current.y,
-    }));
-  };
-
-  const handleMouseUp = () => {
-    setIsDragging(false);
-  };
-
-  // Zoom interaction via mouse wheel
-  const handleWheel = (e: React.WheelEvent) => {
-    e.preventDefault();
-    const zoomFactor = e.deltaY < 0 ? 1.08 : 0.92;
-    setTransform((prev) => {
-      const newScale = Math.max(0.3, Math.min(2.0, prev.scale * zoomFactor));
-      return { ...prev, scale: newScale };
-    });
-  };
 
   // Compute Active/Dimmed State
   const { highlightedNodeIds, highlightedEdgeIds } = useMemo(() => {
@@ -462,6 +613,13 @@ export function MapCanvas({
 
   const hasSelection = Boolean(selectedNodeId || selectedFilePath);
 
+  // Cursor style based on interaction
+  const canvasCursorClass = isPanning
+    ? "cursor-grabbing"
+    : isSpacePressed
+    ? "cursor-grab"
+    : "cursor-default";
+
   return (
     <div
       ref={containerRef}
@@ -469,14 +627,11 @@ export function MapCanvas({
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
       onMouseLeave={handleMouseUp}
-      onWheel={handleWheel}
       onDragEnter={handleDragEnter}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
-      className={`flex-1 h-full relative overflow-hidden bg-zinc-950 select-none ${
-        isDragging ? "cursor-grabbing" : "cursor-grab"
-      }`}
+      className={`flex-1 h-full relative overflow-hidden bg-zinc-950 select-none ${canvasCursorClass}`}
     >
       {/* 1. Full-Canvas Drag Overlay */}
       <DropOverlay isVisible={isDraggingOver} />
@@ -509,7 +664,7 @@ export function MapCanvas({
       />
 
       {/* 4. Canvas Top Status Overlay & Manual Upload Action */}
-      <div className="absolute top-3 left-3 z-20 flex items-center gap-2.5 bg-zinc-900/90 border border-zinc-800 backdrop-blur-md px-3 py-1.5 rounded-lg text-xs shadow-xl">
+      <div className="absolute top-3 left-3 z-20 flex items-center gap-2.5 bg-zinc-900/90 border border-zinc-800 backdrop-blur-md px-3 py-1.5 rounded-lg text-xs shadow-xl pointer-events-auto">
         <span className="flex h-2 w-2 relative">
           <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
           <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
@@ -547,43 +702,53 @@ export function MapCanvas({
         </div>
       </div>
 
-      {/* 5. Floating Zoom & View Controls */}
-      <div className="absolute bottom-4 right-4 z-20 flex items-center gap-1 bg-zinc-900/95 border border-zinc-800 backdrop-blur-md p-1 rounded-lg text-zinc-300 shadow-xl">
+      {/* 5. Floating Zoom & Navigation Controls */}
+      <div className="absolute bottom-4 right-4 z-20 flex items-center gap-1 bg-zinc-900/95 border border-zinc-800 backdrop-blur-md p-1 rounded-lg text-zinc-300 shadow-xl pointer-events-auto">
         <button
           type="button"
-          onClick={() =>
-            setTransform((p) => ({ ...p, scale: Math.min(2.0, p.scale * 1.15) }))
-          }
+          onClick={handleZoomIn}
           className="p-1.5 rounded hover:bg-zinc-800 hover:text-white transition-colors"
-          title="Zoom In"
+          title="Zoom In (Scroll Up or Pinch)"
         >
           <ZoomIn className="w-4 h-4" />
         </button>
         <button
           type="button"
-          onClick={() =>
-            setTransform((p) => ({ ...p, scale: Math.max(0.3, p.scale * 0.85) }))
-          }
+          onClick={handleZoomOut}
           className="p-1.5 rounded hover:bg-zinc-800 hover:text-white transition-colors"
-          title="Zoom Out"
+          title="Zoom Out (Scroll Down or Pinch)"
         >
           <ZoomOut className="w-4 h-4" />
         </button>
         <div className="w-px h-4 bg-zinc-800" />
         <button
           type="button"
+          onClick={handleResetZoom}
+          className="px-2 py-1 rounded hover:bg-zinc-800 hover:text-white transition-colors text-[10px] font-mono"
+          title="Reset Zoom to 100%"
+        >
+          {Math.round(transform.scale * 100)}%
+        </button>
+        <div className="w-px h-4 bg-zinc-800" />
+        <button
+          type="button"
           onClick={handleFitView}
           className="p-1.5 rounded hover:bg-zinc-800 hover:text-white transition-colors"
-          title="Fit View"
+          title="Fit Entire Graph to View"
         >
           <Maximize2 className="w-4 h-4" />
         </button>
-        <span className="px-2 text-[10px] font-mono text-zinc-500 border-l border-zinc-800">
-          {Math.round(transform.scale * 100)}%
-        </span>
       </div>
 
-      {/* 6. Infinite Viewport Stage */}
+      {/* 6. Spacebar Pan Mode Indicator */}
+      {isSpacePressed && (
+        <div className="absolute bottom-4 left-4 z-20 flex items-center gap-1.5 bg-blue-600/90 text-white border border-blue-400/40 backdrop-blur-md px-2.5 py-1 rounded-md text-xs font-medium shadow-lg animate-in fade-in duration-150">
+          <Hand className="w-3.5 h-3.5" />
+          <span>Pan Mode Active (Drag to navigate)</span>
+        </div>
+      )}
+
+      {/* 7. Infinite Viewport Stage */}
       <div
         className="absolute inset-0 pointer-events-none"
         style={{

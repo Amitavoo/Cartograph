@@ -43,3 +43,4 @@ export function DropOverlay({ isVisible }: DropOverlayProps) {
     </div>
   );
 }
+

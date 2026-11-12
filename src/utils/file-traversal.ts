@@ -180,3 +180,4 @@ export function processFileListFallback(fileList: FileList): TraversalResult {
     errors: [],
   };
 }
+

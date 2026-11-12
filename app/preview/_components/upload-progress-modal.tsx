@@ -148,3 +148,4 @@ export function UploadProgressModal({ state, onClose }: UploadProgressModalProps
     </div>
   );
 }
+
