@@ -114,3 +114,4 @@ export function AnalyticsCharts({ analyses }: { analyses: AnalysisRecord[] }) {
     </div>
   );
 }
+

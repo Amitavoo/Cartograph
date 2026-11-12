@@ -1,0 +1,59 @@
+{
+  "version": 2,
+  "skills": {
+    "architect": {
+      "source": "jsmastery-pro/skills",
+      "sourceType": "github",
+      "skillPath": "skills/architect/SKILL.md",
+      "computedHash": "1daa4e312fd487288aad638031e3a7ca9508adfa15f5cb38f38de2914e4f04fb"
+    },
+    "audit": {
+      "source": "jsmastery-pro/skills",
+      "sourceType": "github",
+      "skillPath": "skills/audit/SKILL.md",
+      "computedHash": "2547dd1bb22e60048398153aceeb43f7fce3d8251c2d9627982c5cc4d887bb6a"
+    },
+    "check": {
+      "source": "jsmastery-pro/skills",
+      "sourceType": "github",
+      "skillPath": "skills/check/SKILL.md",
+      "computedHash": "1ae945920ec8869c36e58bb73e4c44da8f5bdc7bc5b9dec6d035215f4ccda3d3"
+    },
+    "debug": {
+      "source": "jsmastery-pro/skills",
+      "sourceType": "github",
+      "skillPath": "skills/debug/SKILL.md",
+      "computedHash": "5a2c9cbcdec4647974882c46ab9d9efecc6d8ea4e3f32393632be8c1290ca904"
+    },
+    "develop": {
+      "source": "jsmastery-pro/skills",
+      "sourceType": "github",
+      "skillPath": "skills/develop/SKILL.md",
+      "computedHash": "3bf42d7f47d79a6a4c1fd9faab0a16d37e0b4e616d00de4f611db61063d40cd6"
+    },
+    "document": {
+      "source": "jsmastery-pro/skills",
+      "sourceType": "github",
+      "skillPath": "skills/document/SKILL.md",
+      "computedHash": "2d4ab42a4ffe7cc64c340fefdbcaa2ce2a84110d9885c0c99b70a696024710d0"
+    },
+    "scope": {
+      "source": "jsmastery-pro/skills",
+      "sourceType": "github",
+      "skillPath": "skills/scope/SKILL.md",
+      "computedHash": "384dbf12c45824c6a4f676b954ce2fd9b9746fa714f781a25c567ef32400298e"
+    },
+    "sync": {
+      "source": "jsmastery-pro/skills",
+      "sourceType": "github",
+      "skillPath": "skills/sync/SKILL.md",
+      "computedHash": "5a88ad828e9845a79162c7b7c05222ac530dd1ca862a4a4e16092a40bdb4f59c"
+    },
+    "test": {
+      "source": "jsmastery-pro/skills",
+      "sourceType": "github",
+      "skillPath": "skills/test/SKILL.md",
+      "computedHash": "45c9c47797331cac473fc8d03ad4d1098ddba1f00fb81c43af9379378b2c75c1"
+    }
+  }
+}

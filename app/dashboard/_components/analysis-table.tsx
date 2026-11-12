@@ -452,3 +452,4 @@ export function AnalysisTable({ analyses: initialAnalyses }: { analyses: Analysi
     </div>
   );
 }
+
