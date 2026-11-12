@@ -221,3 +221,4 @@ create policy "insights_select_policy" on insights for select to authenticated, 
 create policy "insights_insert_policy" on insights for insert to authenticated, anon with check (organization_id = (select auth_org_id()));
 create policy "insights_update_policy" on insights for update to authenticated, anon using (organization_id = (select auth_org_id())) with check (organization_id = (select auth_org_id()));
 create policy "insights_delete_policy" on insights for delete to authenticated, anon using (organization_id = (select auth_org_id()));
+
