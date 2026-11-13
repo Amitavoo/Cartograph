@@ -203,6 +203,7 @@ export function AnalysisExplorer({
       {/* 1. Header with dynamic repository title */}
       <PreviewHeader
         repoName={summary.name}
+        framework={summary.framework}
         filesCount={activeData.files.length}
         edgesCount={activeData.edges.length}
         foldersCount={activeData.folders.length}

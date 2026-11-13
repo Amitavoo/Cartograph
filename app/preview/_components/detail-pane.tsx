@@ -106,18 +106,29 @@ export function DetailPane({
 
     const folderFrameworkMap = new Map<string, string>();
     for (const f of allFiles) {
-      const parts = f.path.split("/");
+      const norm = f.path.replace(/\\/g, "/");
+      const parts = norm.split("/");
       if (parts.length > 2) {
         const subLoc = parts.slice(0, 2).join("/") + "/";
         if (
-          f.path.includes("/app/") ||
-          f.path.includes("/pages/") ||
-          f.name.includes("next.config")
+          norm.startsWith("app/") ||
+          norm.includes("/app/") ||
+          norm.startsWith("pages/") ||
+          norm.includes("/pages/") ||
+          norm.includes("next.config")
         ) {
           folderFrameworkMap.set(subLoc, "Next.js");
-        } else if (f.name.endsWith(".tsx") || f.name.endsWith(".jsx")) {
+        } else if (norm.endsWith(".tsx") || norm.endsWith(".jsx")) {
           if (!folderFrameworkMap.has(subLoc)) {
             folderFrameworkMap.set(subLoc, "React");
+          }
+        } else if (norm.endsWith(".py")) {
+          if (!folderFrameworkMap.has(subLoc)) {
+            folderFrameworkMap.set(subLoc, "Python");
+          }
+        } else if (norm.includes("adapter/") || norm.includes("adapters/")) {
+          if (!folderFrameworkMap.has(subLoc)) {
+            folderFrameworkMap.set(subLoc, "Adapter");
           }
         }
       }

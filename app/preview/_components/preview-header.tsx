@@ -8,6 +8,7 @@ interface PreviewHeaderProps {
   edgesCount: number;
   foldersCount: number;
   commitHash?: string | null;
+  framework?: string;
   onRerun?: () => void;
 }
 
@@ -17,6 +18,7 @@ export function PreviewHeader({
   edgesCount,
   foldersCount,
   commitHash,
+  framework,
   onRerun,
 }: PreviewHeaderProps) {
   return (
@@ -41,6 +43,11 @@ export function PreviewHeader({
               <span className="font-semibold text-sm tracking-tight text-[var(--color-text)]">
                 {repoName}
               </span>
+              {framework && (
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20 font-medium">
+                  {framework}
+                </span>
+              )}
               {commitHash ? (
                 <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[var(--color-surface-sunken)] border border-[var(--color-border)] text-[var(--color-text-muted)] flex items-center gap-1">
                   <GitCommit className="w-3 h-3" />
