@@ -19,7 +19,8 @@ import {
   StoredAnalysis,
   ParsedRepoInfo,
 } from "./types";
-import { parseRepository } from "../parser";
+import { parseRepository, walkRepository } from "../parser";
+import { extractRepositoryRoutes } from "../scaffolding/routes";
 
 /**
  * Executes the stages of the pipeline:
@@ -52,7 +53,8 @@ async function executePipelineStages(
     await updateAnalysisStage(
       analysis.id,
       "fetching",
-      `Fetching archive for ${repoInfo.fullName}@${metadata.commitHash.slice(0, 7)}...`
+      `Fetching archive for ${repoInfo.fullName}@${metadata.commitHash.slice(0, 7)}...`,
+      { commitHash: metadata.commitHash }
     );
 
     await downloadAndExtractArchive(
@@ -67,7 +69,25 @@ async function executePipelineStages(
     await updateAnalysisStage(
       analysis.id,
       "selecting",
-      "Scanning directory tree and selecting source files..."
+      "Scanning directory tree and discovering source files...",
+      { commitHash: metadata.commitHash }
+    );
+
+    const walkResult = walkRepository(tempDir);
+    if (walkResult.filesToParse.length === 0) {
+      throw new Error(
+        `No supported source files discovered in repository (${walkResult.filesFound} scanned, ${walkResult.skippedFiles.length} excluded).`
+      );
+    }
+
+    await updateAnalysisStage(
+      analysis.id,
+      "selecting",
+      `Discovered ${walkResult.filesFound} files (${walkResult.filesToParse.length} source files selected, ${walkResult.skippedFiles.length} excluded)`,
+      {
+        fileCount: walkResult.filesToParse.length,
+        commitHash: metadata.commitHash,
+      }
     );
 
     // STAGE 3: PARSE
@@ -75,17 +95,48 @@ async function executePipelineStages(
     await updateAnalysisStage(
       analysis.id,
       "parsing",
-      "Building ASTs, resolving import graph, and computing metrics..."
+      `Building ASTs and resolving imports for ${walkResult.filesToParse.length} files...`,
+      {
+        fileCount: walkResult.filesToParse.length,
+        commitHash: metadata.commitHash,
+      }
     );
 
     const parserOutput = await parseRepository(tempDir);
+    const routes = extractRepositoryRoutes(parserOutput.files);
+
+    const totalInternal =
+      parserOutput.coverage.resolvedInternalEdges +
+      parserOutput.coverage.unresolvedInternalCount;
+    const coveragePercentage =
+      totalInternal > 0
+        ? Number(((parserOutput.coverage.resolvedInternalEdges / totalInternal) * 100).toFixed(2))
+        : 100.0;
+
+    await updateAnalysisStage(
+      analysis.id,
+      "parsing",
+      `Parsed ${parserOutput.files.length} files: ${parserOutput.edges.length} edges generated, ${routes.length} routes detected (${coveragePercentage}% resolved)`,
+      {
+        fileCount: parserOutput.files.length,
+        edgeCount: parserOutput.edges.length,
+        commitHash: metadata.commitHash,
+        coveragePercentage,
+      }
+    );
 
     // STAGE 4: STORE
     currentStage = "storing";
     await updateAnalysisStage(
       analysis.id,
       "storing",
-      `Storing ${parserOutput.files.length} files and ${parserOutput.edges.length} edges in database...`
+      `Persisting ${parserOutput.files.length} files, ${parserOutput.edges.length} edges, and ${routes.length} routes to database...`,
+      {
+        fileCount: parserOutput.files.length,
+        edgeCount: parserOutput.edges.length,
+        commitHash: metadata.commitHash,
+        coveragePercentage,
+      }
     );
 
     await storeAnalysisResults(

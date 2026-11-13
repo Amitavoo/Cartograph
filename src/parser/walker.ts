@@ -3,14 +3,50 @@ import * as path from "node:path";
 import * as crypto from "node:crypto";
 import { ParsedFile, SkippedFile } from "./types";
 
-const SOURCE_EXTENSIONS = new Set([
+export const SOURCE_EXTENSIONS = new Set([
+  // TypeScript & JavaScript
   ".ts",
   ".tsx",
   ".js",
   ".jsx",
   ".mjs",
   ".cjs",
+  ".mts",
+  ".cts",
+  // Python
+  ".py",
+  // Go
+  ".go",
+  // Rust
+  ".rs",
+  // Java
+  ".java",
 ]);
+
+export function detectLanguage(extension: string): string {
+  switch (extension.toLowerCase()) {
+    case ".ts":
+    case ".tsx":
+    case ".mts":
+    case ".cts":
+      return "typescript";
+    case ".js":
+    case ".jsx":
+    case ".mjs":
+    case ".cjs":
+      return "javascript";
+    case ".py":
+      return "python";
+    case ".go":
+      return "go";
+    case ".rs":
+      return "rust";
+    case ".java":
+      return "java";
+    default:
+      return "unknown";
+  }
+}
 
 const IGNORED_DIRECTORY_NAMES = new Set([
   ".git",

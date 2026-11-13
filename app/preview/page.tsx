@@ -200,11 +200,10 @@ export default function PreviewPage() {
               <button
                 type="button"
                 onClick={() => setCenterTab("map")}
-                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                  centerTab === "map"
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${centerTab === "map"
                     ? "bg-[var(--color-surface-raised)] text-[var(--color-text)] shadow-sm border border-[var(--color-border)]"
                     : "text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface-sunken)]"
-                }`}
+                  }`}
               >
                 <Network className="w-3.5 h-3.5 text-blue-400" />
                 <span>Map</span>
@@ -213,11 +212,10 @@ export default function PreviewPage() {
               <button
                 type="button"
                 onClick={() => setCenterTab("routes")}
-                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                  centerTab === "routes"
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${centerTab === "routes"
                     ? "bg-[var(--color-surface-raised)] text-[var(--color-text)] shadow-sm border border-[var(--color-border)]"
                     : "text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface-sunken)]"
-                }`}
+                  }`}
               >
                 <Route className="w-3.5 h-3.5 text-purple-400" />
                 <span>Routes</span>

@@ -59,9 +59,12 @@ export default async function AnalysisPage({ params }: PageProps) {
     if (storedGraphData && storedGraphData.files.length > 0) {
       return (
         <AnalysisExplorer
+          analysisId={id}
           initialData={storedGraphData}
           coveragePercentage={analysis.coverage_percentage}
           repositoryName={(analysis.projects as any)?.name || "Repository"}
+          repositoryUrl={(analysis.projects as any)?.repository_url || ""}
+          commitHash={analysis.commit_hash}
         />
       );
     }

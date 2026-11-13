@@ -20,6 +20,9 @@ import {
   Hand,
   Move,
   ArrowRightLeft,
+  X,
+  ArrowDownRight,
+  ArrowUpRight,
 } from "lucide-react";
 
 interface MapCanvasProps {
@@ -687,6 +690,16 @@ export function MapCanvas({
     ? "cursor-grab"
     : "cursor-default";
 
+  const activeSelectedNode = selectedNodeId ? nodeMap.get(selectedNodeId) : null;
+  const incomingDependentsCount = useMemo(
+    () => (selectedNodeId ? edges.filter((e) => e.targetNodeId === selectedNodeId).length : 0),
+    [edges, selectedNodeId]
+  );
+  const outgoingDependenciesCount = useMemo(
+    () => (selectedNodeId ? edges.filter((e) => e.sourceNodeId === selectedNodeId).length : 0),
+    [edges, selectedNodeId]
+  );
+
   return (
     <div
       ref={containerRef}
@@ -708,6 +721,34 @@ export function MapCanvas({
           {nodes.length} folded nodes • {openNodeIds.size} open panels • Drag nodes to untangle
         </span>
       </div>
+
+      {/* Selected Module Relationship HUD Overlay */}
+      {selectedNodeId && activeSelectedNode && (
+        <div className="absolute top-3 left-1/2 -translate-x-1/2 z-20 hidden sm:flex items-center gap-3 bg-zinc-900/95 border border-zinc-700/80 backdrop-blur-md px-3.5 py-1.5 rounded-xl text-xs shadow-2xl animate-fadeIn">
+          <div className="flex items-center gap-1.5 font-semibold text-zinc-100">
+            <span className="w-2 h-2 rounded-full bg-blue-400" />
+            <span>{activeSelectedNode.label}</span>
+          </div>
+          <span className="text-zinc-600">|</span>
+          <div className="flex items-center gap-1 text-[11px] font-mono text-emerald-400">
+            <ArrowDownRight className="w-3.5 h-3.5 text-emerald-400" />
+            <span>{incomingDependentsCount} Dependents (Incoming)</span>
+          </div>
+          <span className="text-zinc-600">|</span>
+          <div className="flex items-center gap-1 text-[11px] font-mono text-blue-400">
+            <ArrowUpRight className="w-3.5 h-3.5 text-blue-400" />
+            <span>{outgoingDependenciesCount} Dependencies (Outgoing)</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => onSelectNode(null)}
+            className="ml-1 text-zinc-400 hover:text-zinc-200 transition-colors"
+            title="Clear selection"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
 
       {/* 2. Floating Navigation Controls in Bottom Right */}
       <div className="absolute bottom-4 right-4 z-20 flex items-center gap-1 bg-zinc-900/95 border border-zinc-800 backdrop-blur-md p-1.5 rounded-xl text-zinc-300 shadow-2xl">
@@ -849,6 +890,30 @@ export function MapCanvas({
             >
               <path d="M 0 1 L 9 5 L 0 9 z" fill="#3b82f6" />
             </marker>
+            {/* Dedicated Incoming Dependent Marker (Emerald) */}
+            <marker
+              id="edge-arrow-incoming"
+              viewBox="0 0 10 10"
+              refX="8"
+              refY="5"
+              markerWidth="8"
+              markerHeight="8"
+              orient="auto-start-reverse"
+            >
+              <path d="M 0 1 L 9 5 L 0 9 z" fill="#10b981" />
+            </marker>
+            {/* Dedicated Outgoing Dependency Marker (Blue) */}
+            <marker
+              id="edge-arrow-outgoing"
+              viewBox="0 0 10 10"
+              refX="8"
+              refY="5"
+              markerWidth="8"
+              markerHeight="8"
+              orient="auto-start-reverse"
+            >
+              <path d="M 0 1 L 9 5 L 0 9 z" fill="#3b82f6" />
+            </marker>
             {Object.entries(CATEGORY_STYLES).map(([catId, catStyle]) => (
               <marker
                 key={catId}
@@ -901,13 +966,32 @@ export function MapCanvas({
 
             let activeColor = srcCatStyle.hex;
             let activeMarker = `url(#edge-arrow-${srcCat})`;
+            let isIncomingEdge = false;
+            let isOutgoingEdge = false;
 
-            if (selectedNodeId === tgt.id) {
-              activeColor = tgtCatStyle.hex;
-              activeMarker = `url(#edge-arrow-${tgtCat})`;
-            } else if (selectedNodeId === src.id) {
-              activeColor = srcCatStyle.hex;
-              activeMarker = `url(#edge-arrow-${srcCat})`;
+            if (selectedNodeId) {
+              if (selectedNodeId === tgt.id) {
+                // Incoming: dependent module pointing to selected node
+                isIncomingEdge = true;
+                activeColor = "#10b981"; // Emerald
+                activeMarker = "url(#edge-arrow-incoming)";
+              } else if (selectedNodeId === src.id) {
+                // Outgoing: selected node pointing to dependency module
+                isOutgoingEdge = true;
+                activeColor = "#3b82f6"; // Blue
+                activeMarker = "url(#edge-arrow-outgoing)";
+              }
+            } else if (selectedFilePath) {
+              const selectedParent = fileToNodeMap.get(selectedFilePath);
+              if (selectedParent === tgt.id) {
+                isIncomingEdge = true;
+                activeColor = "#10b981";
+                activeMarker = "url(#edge-arrow-incoming)";
+              } else if (selectedParent === src.id) {
+                isOutgoingEdge = true;
+                activeColor = "#3b82f6";
+                activeMarker = "url(#edge-arrow-outgoing)";
+              }
             } else if (selectedCategoryId) {
               const filterCatStyle = getCategoryStyle(selectedCategoryId);
               activeColor = filterCatStyle.hex;
@@ -922,9 +1006,16 @@ export function MapCanvas({
                 d={pathD}
                 fill="none"
                 stroke={isEdgeActive ? activeColor : restingStroke}
-                strokeWidth={isEdgeActive ? 2.5 : Math.min(2.2, Math.max(1.2, edge.count * 0.35))}
+                strokeWidth={
+                  isIncomingEdge || isOutgoingEdge
+                    ? 2.8
+                    : isEdgeActive
+                    ? 2.2
+                    : Math.min(2.0, Math.max(1.0, edge.count * 0.35))
+                }
+                strokeDasharray={isIncomingEdge ? "6 3" : undefined}
                 markerEnd={isEdgeActive ? activeMarker : "url(#edge-arrow)"}
-                opacity={isEdgeDimmed ? 0.06 : 1}
+                opacity={isEdgeDimmed ? 0.04 : 1}
                 className="transition-all duration-75"
               />
             );

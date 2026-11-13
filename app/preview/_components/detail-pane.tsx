@@ -95,6 +95,46 @@ export function DetailPane({
     return map;
   }, [allFiles]);
 
+  const detectedFrameworks = React.useMemo(() => {
+    const findings: Array<{ framework: string; location: string }> = [];
+    const rootHasNext = allFiles.some(
+      (f) =>
+        f.path.startsWith("app/") ||
+        f.path.startsWith("pages/") ||
+        f.name.includes("next.config")
+    );
+
+    const folderFrameworkMap = new Map<string, string>();
+    for (const f of allFiles) {
+      const parts = f.path.split("/");
+      if (parts.length > 2) {
+        const subLoc = parts.slice(0, 2).join("/") + "/";
+        if (
+          f.path.includes("/app/") ||
+          f.path.includes("/pages/") ||
+          f.name.includes("next.config")
+        ) {
+          folderFrameworkMap.set(subLoc, "Next.js");
+        } else if (f.name.endsWith(".tsx") || f.name.endsWith(".jsx")) {
+          if (!folderFrameworkMap.has(subLoc)) {
+            folderFrameworkMap.set(subLoc, "React");
+          }
+        }
+      }
+    }
+
+    if (folderFrameworkMap.size > 0) {
+      if (!rootHasNext) {
+        findings.push({ framework: "Framework", location: "none detected at the root" });
+      }
+      folderFrameworkMap.forEach((fw, loc) => {
+        findings.push({ framework: fw, location: `in ${loc}` });
+      });
+    }
+
+    return findings;
+  }, [allFiles]);
+
   return (
     <aside className="w-80 md:w-96 border-l border-[var(--color-border)] bg-[var(--color-surface)] flex flex-col shrink-0 h-full overflow-hidden select-none">
       {/* 1. Permanent Tab Header (Survives selection changes) */}
@@ -222,6 +262,23 @@ export function DetailPane({
                 </span>
               </div>
             </div>
+
+            {/* Framework Footprint Breakdown (matches reference) */}
+            {detectedFrameworks.length > 0 && (
+              <div className="p-3.5 rounded-xl bg-[var(--color-surface-sunken)]/60 border border-[var(--color-border)] space-y-2 font-mono text-[11px]">
+                <div className="text-[10px] uppercase font-bold text-[var(--color-text-muted)] tracking-wider">
+                  Framework Breakdown
+                </div>
+                <div className="space-y-1">
+                  {detectedFrameworks.map((df, i) => (
+                    <div key={i} className="flex items-center gap-1.5 text-[var(--color-text-muted)]">
+                      <span className="text-[var(--color-text)] font-semibold">{df.framework}</span>
+                      <span className="truncate">{df.location}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Ranked List 1: What the repository leans on most */}
             <div>

@@ -23,6 +23,16 @@ const EXTENSIONS_TO_TRY = [
   "/index.jsx",
   "/index.mjs",
   "/index.cjs",
+  // Python
+  ".py",
+  "/__init__.py",
+  // Rust
+  ".rs",
+  "/mod.rs",
+  // Go
+  ".go",
+  // Java
+  ".java",
 ];
 
 const NODE_BUILTINS = new Set([
@@ -265,6 +275,45 @@ export class ModuleResolver {
     const directResolved = this.tryCandidate(trimmed);
     if (directResolved) {
       return { target: directResolved };
+    }
+
+    // Try baseUrl prefix (e.g. baseUrl: "src")
+    if (this.baseUrl && this.baseUrl !== ".") {
+      const baseCandidate = path.posix.join(this.baseUrl, trimmed);
+      const baseResolved = this.tryCandidate(baseCandidate);
+      if (baseResolved) {
+        return { target: baseResolved };
+      }
+    }
+
+    // Try src/ prefix fallback for TS/JS projects with root src directory
+    if (!trimmed.startsWith("src/")) {
+      const srcResolved = this.tryCandidate(`src/${trimmed}`);
+      if (srcResolved) {
+        return { target: srcResolved };
+      }
+    }
+
+    // Try dotted path as slash path for Python / Java (e.g. models.user -> models/user)
+    if (trimmed.includes(".")) {
+      const slashPath = trimmed.replace(/\./g, "/");
+      const slashResolved = this.tryCandidate(slashPath);
+      if (slashResolved) {
+        return { target: slashResolved };
+      }
+      const slashSrcResolved = this.tryCandidate(`src/${slashPath}`);
+      if (slashSrcResolved) {
+        return { target: slashSrcResolved };
+      }
+    }
+
+    // Rust crate:: path: crate/foo -> src/foo
+    if (trimmed.startsWith("crate/")) {
+      const rustPath = `src/${trimmed.slice(6)}`;
+      const rustResolved = this.tryCandidate(rustPath);
+      if (rustResolved) {
+        return { target: rustResolved };
+      }
     }
 
     // Otherwise, it is an external package import (e.g. 'react', 'next', 'lucide-react')

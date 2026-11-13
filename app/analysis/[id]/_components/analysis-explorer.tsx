@@ -26,14 +26,42 @@ interface AnalysisExplorerProps {
   initialData: ParserOutput;
   coveragePercentage: number | null;
   repositoryName: string;
+  analysisId?: string;
+  repositoryUrl?: string;
+  commitHash?: string | null;
 }
 
 export function AnalysisExplorer({
   initialData,
   coveragePercentage,
   repositoryName,
+  analysisId,
+  repositoryUrl,
+  commitHash,
 }: AnalysisExplorerProps) {
   const [activeData, setActiveData] = useState<ParserOutput>(initialData);
+
+  const handleRerun = async () => {
+    if (!repositoryUrl) return;
+    try {
+      const res = await fetch("/api/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          repositoryUrl,
+          forceRerun: true,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.analysis?.id) {
+          window.location.href = `/analysis/${data.analysis.id}`;
+        }
+      }
+    } catch {
+      // ignore
+    }
+  };
 
   const categories = useMemo(
     () => deriveCategories(activeData.files),
@@ -178,6 +206,8 @@ export function AnalysisExplorer({
         filesCount={activeData.files.length}
         edgesCount={activeData.edges.length}
         foldersCount={activeData.folders.length}
+        commitHash={commitHash}
+        onRerun={repositoryUrl ? handleRerun : undefined}
       />
 
       {/* 2. Coverage Banner (Displays when resolution coverage < 95%) */}

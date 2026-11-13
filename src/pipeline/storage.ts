@@ -1,6 +1,7 @@
 import { query, withTransaction } from "./database";
 import { StoredProject, StoredAnalysis, PipelineStage } from "./types";
 import { ParserOutput } from "../parser/types";
+import { extractRepositoryRoutes } from "../scaffolding/routes";
 
 /**
  * Finds or creates a project record for a given repository URL and organization.
@@ -80,6 +81,13 @@ export async function createAnalysis(
   return res.rows[0];
 }
 
+export interface StageUpdateOptions {
+  fileCount?: number;
+  edgeCount?: number;
+  commitHash?: string;
+  coveragePercentage?: number;
+}
+
 /**
  * Updates an analysis stage and emits a live database change.
  * The attached Postgres trigger automatically broadcasts to 'analysis:<id>'.
@@ -87,15 +95,28 @@ export async function createAnalysis(
 export async function updateAnalysisStage(
   analysisId: string,
   stage: PipelineStage,
-  stageMessage: string
+  stageMessage: string,
+  options?: StageUpdateOptions
 ): Promise<void> {
   await query(
     `UPDATE public.analyses
      SET stage = $1,
          stage_message = $2,
+         file_count = COALESCE($3, file_count),
+         edge_count = COALESCE($4, edge_count),
+         commit_hash = COALESCE($5, commit_hash),
+         coverage_percentage = COALESCE($6, coverage_percentage),
          updated_at = now()
-     WHERE id = $3`,
-    [stage, stageMessage, analysisId]
+     WHERE id = $7`,
+    [
+      stage,
+      stageMessage,
+      options?.fileCount ?? null,
+      options?.edgeCount ?? null,
+      options?.commitHash ?? null,
+      options?.coveragePercentage ?? null,
+      analysisId,
+    ]
   );
 }
 
@@ -136,7 +157,15 @@ export async function storeAnalysisResults(
   commitHash: string
 ): Promise<void> {
   await withTransaction(async (client) => {
-    // 1. Delete any existing files/edges if re-running
+    // 1. Delete any existing files/edges/routes if re-running
+    await client.query(
+      `DELETE FROM public.routes WHERE analysis_id = $1`,
+      [analysisId]
+    );
+    await client.query(
+      `DELETE FROM public.edges WHERE analysis_id = $1`,
+      [analysisId]
+    );
     await client.query(
       `DELETE FROM public.files WHERE analysis_id = $1`,
       [analysisId]
@@ -250,7 +279,49 @@ export async function storeAnalysisResults(
       await client.query(edgeInsertSql, values);
     }
 
-    // 4. Calculate coverage percentage
+    // 4. Batch insert extracted routes
+    try {
+      const extractedRoutes = extractRepositoryRoutes(output.files);
+      const validRoutes = extractedRoutes.filter((r) => fileIdMap.has(r.handlerPath));
+
+      for (let i = 0; i < validRoutes.length; i += batchSize) {
+        const chunk = validRoutes.slice(i, i + batchSize);
+        const valuePlaceholders: string[] = [];
+        const values: any[] = [];
+        let paramIdx = 1;
+
+        for (const r of chunk) {
+          const fileId = fileIdMap.get(r.handlerPath)!;
+          valuePlaceholders.push(
+            `($${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++})`
+          );
+          values.push(
+            organizationId,
+            analysisId,
+            fileId,
+            r.method,
+            r.pattern
+          );
+        }
+
+        const routeInsertSql = `
+          INSERT INTO public.routes (
+            organization_id,
+            analysis_id,
+            file_id,
+            http_method,
+            path
+          )
+          VALUES ${valuePlaceholders.join(", ")}
+        `;
+
+        await client.query(routeInsertSql, values);
+      }
+    } catch (routeErr) {
+      console.warn("Could not insert routes into database (non-fatal):", routeErr);
+    }
+
+    // 5. Calculate coverage percentage
     const resolvedInternal = output.coverage.resolvedInternalEdges;
     const unresolvedInternal = output.coverage.unresolvedInternalCount;
     const totalInternal = resolvedInternal + unresolvedInternal;

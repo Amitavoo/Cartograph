@@ -47,25 +47,40 @@ export function parseRepositoryUrl(rawUrl: string): ParsedRepoInfo {
     owner,
     repo,
     fullName: `${owner}/${repo}`,
-    normalizedUrl: `https://github.com/https://github.com/${owner}/${repo}`.replace("https://github.com/https://github.com/", "https://github.com/"),
+    normalizedUrl: `https://github.com/${owner}/${repo}`,
   };
 }
 
+function getGitHubHeaders(): Record<string, string> {
+  const token =
+    process.env.GITHUB_TOKEN ||
+    process.env.GH_TOKEN ||
+    process.env.GITHUB_API_KEY;
+
+  const headers: Record<string, string> = {
+    "User-Agent": "Cartograph-Engine",
+    Accept: "application/vnd.github.v3+json",
+  };
+
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+
+  return headers;
+}
+
 /**
- * Fetches public repository metadata (commit SHA and default branch)
- * without requiring any GitHub authentication token or OAuth scope.
+ * Fetches public repository metadata (commit SHA and default branch).
  */
 export async function fetchRepositoryMetadata(
   owner: string,
   repo: string
 ): Promise<RepoMetadata> {
   const repoApiUrl = `https://api.github.com/repos/${owner}/${repo}`;
+  const headers = getGitHubHeaders();
 
   const res = await fetch(repoApiUrl, {
-    headers: {
-      "User-Agent": "Cartograph-Engine",
-      Accept: "application/vnd.github.v3+json",
-    },
+    headers,
   });
 
   if (res.status === 404) {
@@ -76,7 +91,7 @@ export async function fetchRepositoryMetadata(
     const rateLimitRemaining = res.headers.get("x-ratelimit-remaining");
     if (rateLimitRemaining === "0") {
       throw new Error(
-        "GitHub API rate limit reached for anonymous requests. Please wait a moment and try again."
+        "GitHub API rate limit reached for anonymous requests. Please provide a GITHUB_TOKEN or wait a moment."
       );
     }
     throw new Error(`Access forbidden when querying GitHub repository: ${owner}/${repo}`);
@@ -94,10 +109,7 @@ export async function fetchRepositoryMetadata(
   // Now fetch the HEAD commit SHA for this branch
   const commitApiUrl = `https://api.github.com/repos/${owner}/${repo}/commits/${defaultBranch}`;
   const commitRes = await fetch(commitApiUrl, {
-    headers: {
-      "User-Agent": "Cartograph-Engine",
-      Accept: "application/vnd.github.v3+json",
-    },
+    headers,
   });
 
   if (!commitRes.ok) {
@@ -134,18 +146,28 @@ export async function downloadAndExtractArchive(
   }
 
   const tarballUrl = `https://api.github.com/repos/${owner}/${repo}/tarball/${commitHash}`;
+  const headers = getGitHubHeaders();
 
-  const res = await fetch(tarballUrl, {
-    headers: {
-      "User-Agent": "Cartograph-Engine",
-    },
+  let res = await fetch(tarballUrl, {
+    headers,
     redirect: "follow",
   });
 
+  // If api.github.com fails or rate-limits, fall back to direct public archive download
   if (!res.ok) {
-    throw new Error(
-      `Failed to download archive for ${owner}/${repo}@${commitHash.slice(0, 7)} (HTTP ${res.status})`
-    );
+    const directUrl = `https://github.com/${owner}/${repo}/archive/${commitHash}.tar.gz`;
+    const fallbackRes = await fetch(directUrl, {
+      headers: { "User-Agent": "Cartograph-Engine" },
+      redirect: "follow",
+    });
+
+    if (fallbackRes.ok) {
+      res = fallbackRes;
+    } else {
+      throw new Error(
+        `Failed to download archive for ${owner}/${repo}@${commitHash.slice(0, 7)} (HTTP ${res.status})`
+      );
+    }
   }
 
   if (!res.body) {
