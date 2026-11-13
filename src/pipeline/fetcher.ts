@@ -184,10 +184,27 @@ export async function downloadAndExtractArchive(
       strip: 1,
     });
 
-    nodeReadable
-      .pipe(extractStream)
-      .on("finish", () => resolve())
-      .on("error", (err: Error) => reject(err));
+    let settled = false;
+    const onDone = () => {
+      if (!settled) {
+        settled = true;
+        resolve();
+      }
+    };
+    const onError = (err: Error) => {
+      if (!settled) {
+        settled = true;
+        reject(err);
+      }
+    };
+
+    extractStream.on("finish", onDone);
+    extractStream.on("close", onDone);
+    extractStream.on("end", onDone);
+    extractStream.on("error", onError);
+    nodeReadable.on("error", onError);
+
+    nodeReadable.pipe(extractStream);
   });
 }
 

@@ -4,6 +4,7 @@ import { createServerSupabaseClient } from "@/utils/supabase/server";
 import { getStoredAnalysisData } from "@/src/pipeline/storage";
 import { ProgressTracker } from "./_components/progress-tracker";
 import { AnalysisExplorer } from "./_components/analysis-explorer";
+import { EmptyAnalysisView } from "./_components/empty-analysis-view";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -50,10 +51,15 @@ export default async function AnalysisPage({ params }: PageProps) {
 
   // If already completed, load real stored files & edges from Postgres
   if (analysis.status === "completed") {
-    let storedGraphData = await getStoredAnalysisData(id);
-    if (!storedGraphData || storedGraphData.files.length === 0) {
-      await new Promise((resolve) => setTimeout(resolve, 300));
+    let storedGraphData = null;
+    try {
       storedGraphData = await getStoredAnalysisData(id);
+      if (!storedGraphData || storedGraphData.files.length === 0) {
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        storedGraphData = await getStoredAnalysisData(id);
+      }
+    } catch (err) {
+      console.error(`Failed to retrieve stored analysis data for ${id}:`, err);
     }
 
     if (storedGraphData && storedGraphData.files.length > 0) {
@@ -68,6 +74,19 @@ export default async function AnalysisPage({ params }: PageProps) {
         />
       );
     }
+
+    // If analysis completed with 0 source files, show empty-state with re-run action
+    return (
+      <div className="min-h-screen bg-[var(--color-surface-sunken)] py-16 px-4 flex items-center justify-center">
+        <EmptyAnalysisView
+          analysisId={id}
+          repositoryName={(analysis.projects as any)?.name || "Repository"}
+          repositoryUrl={(analysis.projects as any)?.repository_url || ""}
+          branch={analysis.branch || "main"}
+          commitHash={analysis.commit_hash}
+        />
+      </div>
+    );
   }
 
   // Otherwise render live progress tracker

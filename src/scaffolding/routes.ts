@@ -1,5 +1,3 @@
-import * as fs from "node:fs";
-import * as path from "node:path";
 import { ParsedFile } from "../parser/types";
 
 export interface ExtractedRoute {
@@ -11,38 +9,15 @@ export interface ExtractedRoute {
   framework: string;
 }
 
-function tryReadFile(filePath: string, repoRoot?: string): string | null {
-  const candidates: string[] = [];
-
-  if (repoRoot) {
-    candidates.push(path.join(repoRoot, filePath));
-  }
-  candidates.push(filePath);
-  candidates.push(path.resolve(filePath));
-
-  // Also check tests/fixtures if running from test runner
-  candidates.push(path.resolve("./tests/fixtures/multi-lang-repo", filePath));
-  candidates.push(path.resolve("./tests/fixtures/barrel-repo", filePath));
-
-  for (const c of candidates) {
-    try {
-      if (fs.existsSync(c)) {
-        return fs.readFileSync(c, "utf8");
-      }
-    } catch {
-      // ignore
-    }
-  }
-  return null;
-}
-
 /**
  * Extracts explicit, deterministic framework routes from parsed files.
  * Rule: Routes are exact or absent. No guessing or inference.
+ * An optional getFileContent callback can be provided (e.g. during server analysis or testing)
+ * to inspect source file contents for explicit HTTP method handlers (GET, POST, etc.)
  */
 export function extractRepositoryRoutes(
   files: ParsedFile[],
-  repoRoot?: string
+  getFileContent?: (filePath: string) => string | null
 ): ExtractedRoute[] {
   const routes: ExtractedRoute[] = [];
   const seenPatterns = new Set<string>();
@@ -102,7 +77,7 @@ export function extractRepositoryRoutes(
         .join("/");
 
       const pattern = "/" + rawRoute;
-      const content = tryReadFile(file.path, repoRoot);
+      const content = getFileContent ? getFileContent(file.path) : null;
       const matchedMethods: Array<"GET" | "POST" | "PUT" | "PATCH" | "DELETE"> = [];
 
       if (content) {
@@ -266,7 +241,7 @@ export function extractRepositoryRoutes(
 
     // 8. Express Route Definitions (router.get, app.post, etc.)
     if (norm.endsWith(".ts") || norm.endsWith(".js")) {
-      const content = tryReadFile(file.path, repoRoot);
+      const content = getFileContent ? getFileContent(file.path) : null;
       if (content && (content.includes("express") || content.includes("router.") || content.includes("app."))) {
         const expressMatches = content.matchAll(
           /(?:app|router)\.(get|post|put|patch|delete)\s*\(\s*['"]([^'"]+)['"]/gi
@@ -293,7 +268,7 @@ export function extractRepositoryRoutes(
 
     // 9. FastAPI Route Definitions (@app.get, @router.post, etc.)
     if (norm.endsWith(".py")) {
-      const content = tryReadFile(file.path, repoRoot);
+      const content = getFileContent ? getFileContent(file.path) : null;
       if (content && (content.includes("FastAPI") || content.includes("@app.") || content.includes("@router."))) {
         const fastApiMatches = content.matchAll(
           /@(?:app|router)\.(get|post|put|patch|delete)\s*\(\s*['"]([^'"]+)['"]/gi

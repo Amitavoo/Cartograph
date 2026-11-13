@@ -59,7 +59,14 @@ async function runMultiLangTest() {
   console.log(`  ✓ Rust edge verified: ${rustEdge.source} -> ${rustEdge.target}`);
 
   // 3. Check FastAPI Route Detection
-  const routes = extractRepositoryRoutes(result.files, fixtureDir);
+  const getFileContent = (relPath: string) => {
+    try {
+      const fullPath = path.join(fixtureDir, relPath);
+      if (fs.existsSync(fullPath)) return fs.readFileSync(fullPath, "utf8");
+    } catch {}
+    return null;
+  };
+  const routes = extractRepositoryRoutes(result.files, getFileContent);
   const fastApiRoute = routes.find((r) => r.pattern === "/api/items" && r.method === "GET");
   assert(fastApiRoute, "FastAPI @app.get('/api/items') should be extracted");
   console.log(`  ✓ FastAPI route verified: ${fastApiRoute.method} ${fastApiRoute.pattern} (${fastApiRoute.framework})`);

@@ -103,7 +103,14 @@ async function executePipelineStages(
     );
 
     const parserOutput = await parseRepository(tempDir);
-    const routes = extractRepositoryRoutes(parserOutput.files);
+    const getFileContent = (relPath: string) => {
+      try {
+        const fullPath = path.join(tempDir, relPath);
+        if (fs.existsSync(fullPath)) return fs.readFileSync(fullPath, "utf8");
+      } catch {}
+      return null;
+    };
+    const routes = extractRepositoryRoutes(parserOutput.files, getFileContent);
 
     const totalInternal =
       parserOutput.coverage.resolvedInternalEdges +

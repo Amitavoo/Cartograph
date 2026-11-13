@@ -162,30 +162,34 @@ export function ProgressTracker({ initialAnalysis, onCompleted }: ProgressTracke
   // Navigate to the interactive map upon completion
   const handleCompletion = useCallback(async () => {
     if (isRedirectingRef.current) return;
-    isRedirectingRef.current = true;
 
     setStatus("completed");
     setCurrentStage("completed");
     setStageMessage("Analysis complete! Map finalized.");
 
     // Fetch finalized data to ensure stats are 100% up to date before redirecting
-    await syncLatestStatus();
+    const latest = await syncLatestStatus();
+    const finalFileCount = latest?.file_count ?? stats.fileCount;
 
-    setTimeout(() => {
-      if (onCompleted) {
-        onCompleted();
-      } else {
-        window.location.reload();
-      }
-    }, 1200);
-  }, [onCompleted, syncLatestStatus]);
+    // Only auto-reload and redirect if files were actually parsed
+    if (finalFileCount > 0) {
+      isRedirectingRef.current = true;
+      setTimeout(() => {
+        if (onCompleted) {
+          onCompleted();
+        } else {
+          window.location.reload();
+        }
+      }, 1200);
+    }
+  }, [onCompleted, syncLatestStatus, stats.fileCount]);
 
-  // Immediate check if initial status was completed
+  // Immediate check if initial status was completed and has files
   useEffect(() => {
-    if (initialAnalysis.status === "completed") {
+    if (initialAnalysis.status === "completed" && (initialAnalysis.file_count || 0) > 0) {
       handleCompletion();
     }
-  }, [initialAnalysis.status, handleCompletion]);
+  }, [initialAnalysis.status, initialAnalysis.file_count, handleCompletion]);
 
   // Timer while running
   useEffect(() => {
