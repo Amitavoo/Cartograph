@@ -80,9 +80,21 @@ async function WorkspaceHome() {
     `)
     .order("created_at", { ascending: false });
 
-  const analyses = (analysesData as unknown as AnalysisRecord[] | null) || [];
+  const rawAnalyses = (analysesData as unknown as AnalysisRecord[] | null) || [];
 
-  // Compute metrics dynamically from actual backend data
+  // Deduplicate by repository project so the dashboard shows the latest analysis per repository
+  const seenProjects = new Set<string>();
+  const analyses: AnalysisRecord[] = [];
+
+  for (const a of rawAnalyses) {
+    const projKey = a.projects?.id || (a as any).project_id || a.projects?.repository_url || a.id;
+    if (!seenProjects.has(projKey)) {
+      seenProjects.add(projKey);
+      analyses.push(a);
+    }
+  }
+
+  // Compute metrics dynamically from unique repository records
   const metrics = {
     total: analyses.length,
     completed: analyses.filter((a) => a.status === "completed").length,

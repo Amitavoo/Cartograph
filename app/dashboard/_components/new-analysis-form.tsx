@@ -11,9 +11,12 @@ export function NewAnalysisForm() {
   const [url, setUrl] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const isSubmittingRef = React.useRef(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmittingRef.current || isLoading) return;
+
     setError(null);
 
     const trimmed = url.trim();
@@ -22,6 +25,7 @@ export function NewAnalysisForm() {
       return;
     }
 
+    isSubmittingRef.current = true;
     setIsLoading(true);
 
     try {
@@ -48,6 +52,7 @@ export function NewAnalysisForm() {
       console.error("Submission failed:", err);
       setError(err?.message || "Failed to analyze repository. Please check the URL.");
       setIsLoading(false);
+      isSubmittingRef.current = false;
     }
   };
 

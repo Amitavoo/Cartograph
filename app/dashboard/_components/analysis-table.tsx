@@ -153,6 +153,14 @@ export function AnalysisTable({ analyses: initialAnalyses }: { analyses: Analysi
           if (payload.eventType === "INSERT") {
             const newRow = payload.new as any;
             setAnalyses((prev) => {
+              const projId = newRow.project_id;
+              if (projId && prev.some((a) => a.projects?.id === projId || (a as any).project_id === projId)) {
+                return prev.map((a) =>
+                  a.projects?.id === projId || (a as any).project_id === projId
+                    ? { ...newRow, projects: a.projects }
+                    : a
+                );
+              }
               if (prev.some((a) => a.id === newRow.id)) return prev;
               return [newRow, ...prev];
             });
@@ -183,9 +191,19 @@ export function AnalysisTable({ analyses: initialAnalyses }: { analyses: Analysi
     };
   }, [session, orgId]);
 
-  // Filtering and Sorting
+  // Filtering and Sorting (One record per unique repository, newest run first)
   const filteredAnalyses = useMemo(() => {
-    return analyses
+    const seen = new Set<string>();
+    const deduplicated: AnalysisRecord[] = [];
+    for (const a of analyses) {
+      const key = a.projects?.id || (a as any).project_id || a.projects?.repository_url || a.id;
+      if (!seen.has(key)) {
+        seen.add(key);
+        deduplicated.push(a);
+      }
+    }
+
+    return deduplicated
       .filter((item) => {
         const matchesStatus =
           statusFilter === "all" ||

@@ -195,15 +195,21 @@ export async function startPipeline(params: PipelineParams): Promise<PipelineRes
   );
 
   // 3. One analysis per repository:
-  // If already analysed and not forcing re-run, return existing analysis
+  // If already analysed (or currently analyzing) and not forcing re-run, return existing analysis
   if (!forceRerun) {
     const existingAnalysis = await findLatestAnalysis(project.id);
-    if (existingAnalysis && existingAnalysis.status === "completed") {
-      return {
-        project,
-        analysis: existingAnalysis,
-        isExisting: true,
-      };
+    if (existingAnalysis) {
+      const isRunning =
+        ["running", "pending", "cloning", "fetching", "selecting", "parsing", "storing"].includes(existingAnalysis.status) ||
+        (existingAnalysis.stage !== "completed" && existingAnalysis.status !== "failed");
+
+      if (existingAnalysis.status === "completed" || isRunning) {
+        return {
+          project,
+          analysis: existingAnalysis,
+          isExisting: true,
+        };
+      }
     }
   }
 
@@ -244,12 +250,18 @@ export async function runPipeline(params: PipelineParams): Promise<PipelineResul
 
   if (!forceRerun) {
     const existingAnalysis = await findLatestAnalysis(project.id);
-    if (existingAnalysis && existingAnalysis.status === "completed") {
-      return {
-        project,
-        analysis: existingAnalysis,
-        isExisting: true,
-      };
+    if (existingAnalysis) {
+      const isRunning =
+        ["running", "pending", "cloning", "fetching", "selecting", "parsing", "storing"].includes(existingAnalysis.status) ||
+        (existingAnalysis.stage !== "completed" && existingAnalysis.status !== "failed");
+
+      if (existingAnalysis.status === "completed" || isRunning) {
+        return {
+          project,
+          analysis: existingAnalysis,
+          isExisting: true,
+        };
+      }
     }
   }
 
