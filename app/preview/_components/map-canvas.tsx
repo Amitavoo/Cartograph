@@ -14,6 +14,7 @@ import {
   Sparkles,
   Hand,
   Move,
+  ArrowRightLeft,
 } from "lucide-react";
 
 interface MapCanvasProps {
@@ -64,6 +65,9 @@ export function MapCanvas({
   const [nodePositions, setNodePositions] = useState<Map<string, { x: number; y: number }>>(
     new Map()
   );
+
+  // Active isolated side-node (moves selected node to left, and arranges its links to the right)
+  const [isolatedSideNodeId, setIsolatedSideNodeId] = useState<string | null>(null);
 
   const getNodePos = useCallback(
     (node: FoldedNode) => {
@@ -165,7 +169,113 @@ export function MapCanvas({
   // Reset node positions back to deterministic defaults
   const handleResetPositions = useCallback(() => {
     setNodePositions(new Map());
+    setIsolatedSideNodeId(null);
   }, []);
+
+  // Move selected node to the side and arrange all its connected nodes neatly
+  const handleToggleMoveToSide = useCallback(
+    (nodeId: string) => {
+      if (isolatedSideNodeId === nodeId) {
+        setIsolatedSideNodeId(null);
+        setNodePositions(new Map());
+        return;
+      }
+
+      const targetNode = nodeMap.get(nodeId);
+      if (!targetNode) return;
+
+      setIsolatedSideNodeId(nodeId);
+
+      // Find direct outgoing dependencies (targetNode -> other)
+      const outgoingNodeIds = new Set<string>();
+      // Find direct incoming dependents (other -> targetNode)
+      const incomingNodeIds = new Set<string>();
+
+      edges.forEach((e) => {
+        if (e.sourceNodeId === nodeId) {
+          outgoingNodeIds.add(e.targetNodeId);
+        }
+        if (e.targetNodeId === nodeId) {
+          incomingNodeIds.add(e.sourceNodeId);
+        }
+      });
+
+      const newPositions = new Map<string, { x: number; y: number }>();
+
+      // Center Y of stage layout
+      const centerY = 450;
+
+      // 1. Place selected node cleanly on the left side
+      newPositions.set(nodeId, { x: 220, y: centerY });
+
+      // 2. Place outgoing dependencies in column at x = 700
+      const outgoingList = Array.from(outgoingNodeIds).filter((id) => id !== nodeId);
+      const outTotal = outgoingList.length;
+      const outSpacing = Math.max(90, Math.min(130, 700 / (outTotal || 1)));
+      const outStartY = centerY - ((outTotal - 1) * outSpacing) / 2;
+
+      outgoingList.forEach((id, idx) => {
+        newPositions.set(id, {
+          x: 700,
+          y: Math.round(outStartY + idx * outSpacing),
+        });
+      });
+
+      // 3. Place incoming dependents in column at x = 1150
+      const incomingList = Array.from(incomingNodeIds).filter(
+        (id) => id !== nodeId && !outgoingNodeIds.has(id)
+      );
+      const inTotal = incomingList.length;
+      const inSpacing = Math.max(90, Math.min(130, 700 / (inTotal || 1)));
+      const inStartY = centerY - ((inTotal - 1) * inSpacing) / 2;
+
+      incomingList.forEach((id, idx) => {
+        newPositions.set(id, {
+          x: 1150,
+          y: Math.round(inStartY + idx * inSpacing),
+        });
+      });
+
+      // 4. Other unconnected nodes placed neatly around background periphery
+      let otherIdx = 0;
+      const otherNodes = nodes.filter(
+        (n) =>
+          n.id !== nodeId &&
+          !outgoingNodeIds.has(n.id) &&
+          !incomingNodeIds.has(n.id)
+      );
+      otherNodes.forEach((n) => {
+        const angle = (otherIdx / (otherNodes.length || 1)) * 2 * Math.PI;
+        newPositions.set(n.id, {
+          x: Math.round(800 + Math.cos(angle) * 750),
+          y: Math.round(centerY + Math.sin(angle) * 450),
+        });
+        otherIdx++;
+      });
+
+      setNodePositions(newPositions);
+
+      // Frame the view nicely
+      if (containerRef.current) {
+        const rect = containerRef.current.getBoundingClientRect();
+        const contentWidth = 1450;
+        const contentHeight = 900;
+        const scaleX = rect.width / contentWidth;
+        const scaleY = rect.height / contentHeight;
+        const newScale = Math.max(MIN_SCALE, Math.min(1.0, Math.min(scaleX, scaleY) * 0.95));
+
+        const newX = (rect.width - contentWidth * newScale) / 2;
+        const newY = (rect.height - contentHeight * newScale) / 2;
+
+        setTransform({
+          x: Math.round(newX),
+          y: Math.round(newY),
+          scale: newScale,
+        });
+      }
+    },
+    [isolatedSideNodeId, nodeMap, edges, nodes]
+  );
 
   // Zoom relative to viewport center (for buttons)
   const handleZoomStep = useCallback((factor: number) => {
@@ -285,6 +395,7 @@ export function MapCanvas({
 
     if (e.button === 0) {
       e.stopPropagation();
+      e.preventDefault();
       const currentPos = getNodePos(node);
       nodeDragStartRef.current = {
         startX: e.clientX,
@@ -553,7 +664,9 @@ export function MapCanvas({
   );
 
   // Determine cursor style
-  const cursorClass = isCanvasPanning
+  const cursorClass = draggedNodeId
+    ? "cursor-grabbing"
+    : isCanvasPanning
     ? "cursor-grabbing"
     : isSpacePressed
     ? "cursor-grab"
@@ -622,6 +735,31 @@ export function MapCanvas({
         >
           <Maximize2 className="w-4 h-4" />
         </button>
+
+        {selectedNodeId && (
+          <>
+            <div className="w-px h-4 bg-zinc-800 mx-0.5" />
+            <button
+              type="button"
+              onClick={() => handleToggleMoveToSide(selectedNodeId)}
+              className={`px-2 py-1 rounded-lg flex items-center gap-1.5 text-xs transition-colors ${
+                isolatedSideNodeId === selectedNodeId
+                  ? "bg-blue-600 text-white font-medium shadow-md shadow-blue-500/30"
+                  : "hover:bg-zinc-800 text-zinc-300 hover:text-white"
+              }`}
+              title={
+                isolatedSideNodeId === selectedNodeId
+                  ? "Restore original layout"
+                  : "Move selected node to side & view links clearly"
+              }
+            >
+              <ArrowRightLeft className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">
+                {isolatedSideNodeId === selectedNodeId ? "Restore" : "Move to Side"}
+              </span>
+            </button>
+          </>
+        )}
 
         {nodePositions.size > 0 && (
           <>
@@ -755,6 +893,8 @@ export function MapCanvas({
 
           const pos = getNodePos(node);
 
+          const isNodeMovedToSide = isolatedSideNodeId === node.id;
+
           return (
             <div
               key={node.id}
@@ -766,14 +906,39 @@ export function MapCanvas({
                 position: "absolute",
                 left: `${pos.x}px`,
                 top: `${pos.y}px`,
-                zIndex: isBeingDragged ? 60 : isOpen ? 30 : isNodeSelected ? 20 : 10,
+                zIndex: isBeingDragged ? 70 : isOpen ? 35 : isNodeSelected ? 30 : 10,
+                transition: isBeingDragged
+                  ? "none"
+                  : "left 0.35s cubic-bezier(0.16, 1, 0.3, 1), top 0.35s cubic-bezier(0.16, 1, 0.3, 1)",
               }}
               className={`${
                 isBeingDragged
-                  ? "ring-2 ring-blue-500/80 shadow-2xl scale-[1.02]"
+                  ? "ring-2 ring-blue-500/80 shadow-2xl scale-[1.02] cursor-grabbing"
                   : ""
               }`}
             >
+              {/* Floating action pill directly above selected node */}
+              {isNodeSelected && !isOpen && (
+                <div
+                  className="absolute -top-9 left-1/2 -translate-x-1/2 z-50 flex items-center gap-1.5 bg-blue-600 hover:bg-blue-500 text-white shadow-xl shadow-blue-500/30 px-3 py-1 rounded-full text-xs font-semibold whitespace-nowrap cursor-pointer transition-all active:scale-95 border border-blue-400/50"
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleToggleMoveToSide(node.id);
+                  }}
+                  title={
+                    isNodeMovedToSide
+                      ? "Restore original graph layout"
+                      : "Move node to side and untangle connections"
+                  }
+                >
+                  <ArrowRightLeft className="w-3.5 h-3.5" />
+                  <span>
+                    {isNodeMovedToSide ? "Restore Map" : "Move to Side & View Links"}
+                  </span>
+                </div>
+              )}
+
               {isOpen ? (
                 <OpenPanelComponent
                   node={node}
@@ -781,6 +946,7 @@ export function MapCanvas({
                   selectedCategoryId={selectedCategoryId}
                   isSelectedNode={isNodeSelected}
                   isDimmed={isDimmed}
+                  isMovedToSide={isNodeMovedToSide}
                   onClose={() => toggleNodeOpen(node.id)}
                   onSelectNode={() => {
                     onSelectNode(node.id);
@@ -790,12 +956,15 @@ export function MapCanvas({
                     onSelectFile(file);
                     onSelectNode(null);
                   }}
+                  onMoveToSide={() => handleToggleMoveToSide(node.id)}
                 />
               ) : (
                 <FoldedNodeComponent
                   node={node}
                   isSelected={isNodeSelected}
                   isDimmed={isDimmed}
+                  isBeingDragged={isBeingDragged}
+                  isMovedToSide={isNodeMovedToSide}
                   selectedCategoryId={selectedCategoryId}
                   matchedFilesCount={matchedFilesCount}
                   onClick={(e) => {
@@ -809,6 +978,7 @@ export function MapCanvas({
                     e.stopPropagation();
                     toggleNodeOpen(node.id);
                   }}
+                  onMoveToSide={() => handleToggleMoveToSide(node.id)}
                 />
               )}
             </div>

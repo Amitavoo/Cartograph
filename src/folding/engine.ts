@@ -340,6 +340,42 @@ function computeDeterministicLayout(
     }
   }
 
+  // Collision separation pass: guarantee nodes do not visually overlap
+  const minSepX = 220;
+  const minSepY = 110;
+  for (let pass = 0; pass < 30; pass++) {
+    let shifted = false;
+    for (let i = 0; i < n; i++) {
+      const p1 = positions.get(nodeIds[i])!;
+      for (let j = i + 1; j < n; j++) {
+        const p2 = positions.get(nodeIds[j])!;
+        const dx = p2.x - p1.x;
+        const dy = p2.y - p1.y;
+        const absX = Math.abs(dx);
+        const absY = Math.abs(dy);
+
+        if (absX < minSepX && absY < minSepY) {
+          shifted = true;
+          const overlapX = minSepX - absX;
+          const overlapY = minSepY - absY;
+
+          if (overlapX < overlapY) {
+            const shift = overlapX / 2 + 5;
+            const sign = dx >= 0 ? 1 : -1;
+            p1.x -= shift * sign;
+            p2.x += shift * sign;
+          } else {
+            const shift = overlapY / 2 + 5;
+            const sign = dy >= 0 ? 1 : -1;
+            p1.y -= shift * sign;
+            p2.y += shift * sign;
+          }
+        }
+      }
+    }
+    if (!shifted) break;
+  }
+
   const result = new Map<string, { x: number; y: number }>();
   for (const [id, p] of positions.entries()) {
     result.set(id, {

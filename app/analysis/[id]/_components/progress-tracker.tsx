@@ -393,3 +393,4 @@ export function ProgressTracker({ initialAnalysis, onCompleted }: ProgressTracke
     </div>
   );
 }
+

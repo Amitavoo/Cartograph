@@ -67,3 +67,4 @@ export default async function AnalysisPage({ params }: PageProps) {
     </div>
   );
 }
+
