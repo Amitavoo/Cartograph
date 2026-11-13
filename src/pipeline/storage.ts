@@ -282,3 +282,125 @@ export async function storeAnalysisResults(
     );
   });
 }
+
+/**
+ * Loads real stored files, edges, and metrics for a completed analysis from the database.
+ * Replaces any checked-in scaffolding files with real live rows.
+ */
+export async function getStoredAnalysisData(
+  analysisId: string
+): Promise<ParserOutput | null> {
+  const analysisRes = await query<StoredAnalysis & { project_name?: string; repository_url?: string }>(
+    `SELECT a.*, p.name as project_name, p.repository_url
+     FROM public.analyses a
+     JOIN public.projects p ON a.project_id = p.id
+     WHERE a.id = $1`,
+    [analysisId]
+  );
+
+  if (analysisRes.rows.length === 0) return null;
+  const analysis = analysisRes.rows[0];
+
+  const filesRes = await query<{
+    id: string;
+    path: string;
+    language: string;
+    size_bytes: number;
+    lines: number;
+    fan_in: number;
+    fan_out: number;
+  }>(
+    `SELECT id, path, language, size_bytes, lines, fan_in, fan_out
+     FROM public.files
+     WHERE analysis_id = $1`,
+    [analysisId]
+  );
+
+  const fileIdToPath = new Map<string, string>();
+  const parsedFiles = filesRes.rows.map((r) => {
+    fileIdToPath.set(r.id, r.path);
+    const filename = r.path.split("/").pop() || r.path;
+    const folder = r.path.includes("/")
+      ? r.path.substring(0, r.path.lastIndexOf("/"))
+      : ".";
+    const ext = "." + (r.path.split(".").pop() || "");
+
+    return {
+      id: r.path,
+      path: r.path,
+      folder,
+      name: filename,
+      extension: ext,
+      lines: r.lines || 0,
+      sizeBytes: r.size_bytes || 0,
+      contentHash: "",
+      fanIn: r.fan_in || 0,
+      fanOut: r.fan_out || 0,
+    };
+  });
+
+  const edgesRes = await query<{
+    source_file_id: string;
+    target_file_id: string;
+    import_type: string;
+    specifier: string;
+  }>(
+    `SELECT source_file_id, target_file_id, import_type, specifier
+     FROM public.edges
+     WHERE analysis_id = $1`,
+    [analysisId]
+  );
+
+  const parsedEdges = [];
+  for (const e of edgesRes.rows) {
+    const source = fileIdToPath.get(e.source_file_id);
+    const target = fileIdToPath.get(e.target_file_id);
+    if (source && target) {
+      const kind =
+        e.import_type === "reexport"
+          ? ("reexport" as const)
+          : e.import_type === "dynamic"
+          ? ("dynamic" as const)
+          : ("import" as const);
+
+      parsedEdges.push({
+        source,
+        target,
+        kind,
+        specifier: e.specifier,
+        line: 1,
+      });
+    }
+  }
+
+  const folderSet = new Set<string>();
+  for (const f of parsedFiles) {
+    folderSet.add(f.folder);
+  }
+  const folders = Array.from(folderSet).sort();
+
+  return {
+    version: "1.0.0",
+    repositoryPath: analysis.repository_url || analysis.project_name || "repository",
+    parsedAt: analysis.completed_at || analysis.created_at,
+    files: parsedFiles,
+    edges: parsedEdges,
+    folders,
+    coverage: {
+      filesFound: parsedFiles.length,
+      filesParsed: parsedFiles.length,
+      filesSkipped: 0,
+      skipReasons: {},
+      skippedFiles: [],
+      totalImportsSeen: parsedEdges.length,
+      resolvedInternalEdges: parsedEdges.length,
+      externalPackagesSeen: 0,
+      unresolvedInternalCount: 0,
+      unresolvedImports: [],
+      reexportsFound: 0,
+      reexportsResolved: 0,
+      reexportsUnresolved: [],
+    },
+  };
+}
+

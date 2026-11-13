@@ -59,3 +59,4 @@ export interface PipelineResult {
   analysis: StoredAnalysis;
   isExisting: boolean;
 }
+

@@ -11,50 +11,26 @@ import {
   storeAnalysisResults,
   markAnalysisFailed,
 } from "./storage";
-import { PipelineParams, PipelineResult, PipelineStage } from "./types";
+import {
+  PipelineParams,
+  PipelineResult,
+  PipelineStage,
+  StoredProject,
+  StoredAnalysis,
+  ParsedRepoInfo,
+} from "./types";
 import { parseRepository } from "../parser";
 
 /**
- * Runs the full Cartograph pipeline:
- * fetch -> select -> parse -> store
- *
- * Guaranteed catch at the top writes a failed state rather than leaving
- * a row stuck mid-parse forever.
+ * Executes the stages of the pipeline:
+ * fetch -> select -> parse -> store -> completed
  */
-export async function runPipeline(params: PipelineParams): Promise<PipelineResult> {
-  const { repositoryUrl, organizationId, forceRerun } = params;
-
-  // 1. Normalize and parse repository URL
-  const repoInfo = parseRepositoryUrl(repositoryUrl);
-
-  // 2. Find or create the project row in database
-  const project = await findOrCreateProject(
-    organizationId,
-    repoInfo.normalizedUrl,
-    repoInfo.fullName,
-    "main"
-  );
-
-  // 3. One analysis per repository:
-  // If already analysed and not forcing re-run, return existing analysis
-  if (!forceRerun) {
-    const existingAnalysis = await findLatestAnalysis(project.id);
-    if (existingAnalysis && existingAnalysis.status === "completed") {
-      return {
-        project,
-        analysis: existingAnalysis,
-        isExisting: true,
-      };
-    }
-  }
-
-  // 4. Create new analysis row starting in "fetching" stage
-  const analysis = await createAnalysis(
-    organizationId,
-    project.id,
-    "main"
-  );
-
+async function executePipelineStages(
+  analysis: StoredAnalysis,
+  project: StoredProject,
+  repoInfo: ParsedRepoInfo,
+  organizationId: string
+): Promise<StoredAnalysis> {
   let currentStage: PipelineStage = "fetching";
   const tempDir = path.join(
     os.tmpdir(),
@@ -121,25 +97,14 @@ export async function runPipeline(params: PipelineParams): Promise<PipelineResul
 
     // STAGE 5: COMPLETED
     currentStage = "completed";
-    const completedAnalysis = (await findLatestAnalysis(project.id))!;
-
-    return {
-      project,
-      analysis: completedAnalysis,
-      isExisting: false,
-    };
+    return (await findLatestAnalysis(project.id))!;
   } catch (err: any) {
     console.error(`Pipeline failure during ${currentStage}:`, err);
 
     const errorMessage = err?.message || String(err) || "Unknown pipeline error";
     await markAnalysisFailed(analysis.id, currentStage, errorMessage);
 
-    const failedAnalysis = (await findLatestAnalysis(project.id))!;
-    return {
-      project,
-      analysis: failedAnalysis,
-      isExisting: false,
-    };
+    return (await findLatestAnalysis(project.id))!;
   } finally {
     // Clean up temporary extracted directory
     try {
@@ -150,4 +115,102 @@ export async function runPipeline(params: PipelineParams): Promise<PipelineResul
       console.warn("Failed to remove temporary directory:", cleanupErr);
     }
   }
+}
+
+/**
+ * Starts a pipeline run asynchronously.
+ * Returns immediately with the analysis row (either existing or newly queued)
+ * so the frontend can redirect to the progress page without blocking.
+ */
+export async function startPipeline(params: PipelineParams): Promise<PipelineResult> {
+  const { repositoryUrl, organizationId, forceRerun } = params;
+
+  // 1. Normalize and parse repository URL
+  const repoInfo = parseRepositoryUrl(repositoryUrl);
+
+  // 2. Find or create the project row in database
+  const project = await findOrCreateProject(
+    organizationId,
+    repoInfo.normalizedUrl,
+    repoInfo.fullName,
+    "main"
+  );
+
+  // 3. One analysis per repository:
+  // If already analysed and not forcing re-run, return existing analysis
+  if (!forceRerun) {
+    const existingAnalysis = await findLatestAnalysis(project.id);
+    if (existingAnalysis && existingAnalysis.status === "completed") {
+      return {
+        project,
+        analysis: existingAnalysis,
+        isExisting: true,
+      };
+    }
+  }
+
+  // 4. Create new analysis row starting in "fetching" stage
+  const analysis = await createAnalysis(
+    organizationId,
+    project.id,
+    "main"
+  );
+
+  // 5. Fire background worker (unawaited)
+  executePipelineStages(analysis, project, repoInfo, organizationId).catch((err) => {
+    console.error("Unhandled error in background pipeline execution:", err);
+  });
+
+  return {
+    project,
+    analysis,
+    isExisting: false,
+  };
+}
+
+/**
+ * Runs the full Cartograph pipeline synchronously to completion.
+ * Used by CLI scripts and acceptance tests.
+ */
+export async function runPipeline(params: PipelineParams): Promise<PipelineResult> {
+  const { repositoryUrl, organizationId, forceRerun } = params;
+
+  const repoInfo = parseRepositoryUrl(repositoryUrl);
+
+  const project = await findOrCreateProject(
+    organizationId,
+    repoInfo.normalizedUrl,
+    repoInfo.fullName,
+    "main"
+  );
+
+  if (!forceRerun) {
+    const existingAnalysis = await findLatestAnalysis(project.id);
+    if (existingAnalysis && existingAnalysis.status === "completed") {
+      return {
+        project,
+        analysis: existingAnalysis,
+        isExisting: true,
+      };
+    }
+  }
+
+  const analysis = await createAnalysis(
+    organizationId,
+    project.id,
+    "main"
+  );
+
+  const finalAnalysis = await executePipelineStages(
+    analysis,
+    project,
+    repoInfo,
+    organizationId
+  );
+
+  return {
+    project,
+    analysis: finalAnalysis,
+    isExisting: false,
+  };
 }

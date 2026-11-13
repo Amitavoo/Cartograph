@@ -1,6 +1,8 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
+import { useSession, useAuth } from "@clerk/nextjs";
+import { createBrowserSupabaseClient } from "@/utils/supabase/client";
 import {
   Search,
   Filter,
@@ -15,6 +17,7 @@ import {
   Eye,
   Calendar,
   XCircle,
+  AlertTriangle,
 } from "lucide-react";
 import { AnalysisRecord, AnalysisDrawer } from "./analysis-drawer";
 import { useToast } from "@/app/_components/toast";
@@ -41,7 +44,30 @@ function calculateDuration(start: string, end: string | null): string {
   return `${mins}m ${remSecs}s`;
 }
 
-export function StatusIndicator({ status }: { status: AnalysisRecord["status"] }) {
+export function isAnalysisStale(analysis: AnalysisRecord): boolean {
+  if (analysis.status === "completed" || analysis.status === "failed" || analysis.status === "cancelled") {
+    return false;
+  }
+  const lastActive = new Date(analysis.updated_at || analysis.created_at).getTime();
+  const diffMs = Date.now() - lastActive;
+  return diffMs > 5 * 60 * 1000; // > 5 minutes without progress
+}
+
+export function StatusIndicator({ analysis }: { analysis: AnalysisRecord }) {
+  if (isAnalysisStale(analysis)) {
+    return (
+      <span
+        className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-mono bg-amber-500/10 text-amber-400 border border-amber-500/20"
+        title="Unfinished run older than 5 minutes (abandoned/stale)"
+      >
+        <AlertTriangle className="h-3 w-3 text-amber-400" />
+        Stale
+      </span>
+    );
+  }
+
+  const { status, stage } = analysis;
+
   switch (status) {
     case "completed":
       return (
@@ -54,10 +80,13 @@ export function StatusIndicator({ status }: { status: AnalysisRecord["status"] }
     case "analyzing":
     case "parsing":
     case "cloning":
+      const displayLabel = stage
+        ? stage.charAt(0).toUpperCase() + stage.slice(1)
+        : status.charAt(0).toUpperCase() + status.slice(1);
       return (
         <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-mono bg-blue-500/10 text-blue-400 border border-blue-500/20">
           <span className="h-1.5 w-1.5 rounded-full bg-blue-400 animate-pulse" />
-          {status.charAt(0).toUpperCase() + status.slice(1)}
+          {displayLabel}
         </span>
       );
     case "failed":
@@ -94,10 +123,65 @@ export function AnalysisTable({ analyses: initialAnalyses }: { analyses: Analysi
   const [selectedAnalysis, setSelectedAnalysis] = useState<AnalysisRecord | null>(null);
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
 
+  const { session } = useSession();
+  const { orgId } = useAuth();
+
   // Sync if initialAnalyses changes (e.g. org switched)
   React.useEffect(() => {
     setAnalyses(initialAnalyses);
   }, [initialAnalyses]);
+
+  // Realtime subscription for live updates across browser tabs
+  useEffect(() => {
+    if (!session) return;
+
+    const supabase = createBrowserSupabaseClient(
+      () => session.getToken(),
+      orgId
+    );
+
+    const channel = supabase
+      .channel("dashboard-realtime-analyses")
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "analyses",
+        },
+        (payload) => {
+          if (payload.eventType === "INSERT") {
+            const newRow = payload.new as any;
+            setAnalyses((prev) => {
+              if (prev.some((a) => a.id === newRow.id)) return prev;
+              return [newRow, ...prev];
+            });
+          } else if (payload.eventType === "UPDATE") {
+            const updatedRow = payload.new as any;
+            setAnalyses((prev) =>
+              prev.map((a) => {
+                if (a.id === updatedRow.id) {
+                  return {
+                    ...a,
+                    ...updatedRow,
+                    projects: a.projects,
+                  };
+                }
+                return a;
+              })
+            );
+          } else if (payload.eventType === "DELETE") {
+            const oldRow = payload.old as any;
+            setAnalyses((prev) => prev.filter((a) => a.id !== oldRow.id));
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [session, orgId]);
 
   // Filtering and Sorting
   const filteredAnalyses = useMemo(() => {
@@ -307,7 +391,7 @@ export function AnalysisTable({ analyses: initialAnalyses }: { analyses: Analysi
 
                       {/* Status */}
                       <td className="py-3 px-4 whitespace-nowrap">
-                        <StatusIndicator status={analysis.status} />
+                        <StatusIndicator analysis={analysis} />
                       </td>
 
                       {/* Commit SHA */}

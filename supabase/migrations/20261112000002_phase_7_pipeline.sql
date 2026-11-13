@@ -73,3 +73,16 @@ using (
       and a.organization_id = (select auth_org_id())
   )
 );
+
+-- 5. Add analyses to supabase_realtime publication for table-level dashboard live updates
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables 
+    where pubname = 'supabase_realtime' and tablename = 'analyses'
+  ) then
+    alter publication supabase_realtime add table public.analyses;
+  end if;
+end;
+$$;
+

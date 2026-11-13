@@ -20,6 +20,10 @@ import { useToast } from "@/app/_components/toast";
 export interface AnalysisRecord {
   id: string;
   status: "pending" | "running" | "completed" | "failed" | "cloning" | "parsing" | "analyzing" | "cancelled";
+  stage?: string | null;
+  stage_message?: string | null;
+  failed_at_stage?: string | null;
+  updated_at?: string | null;
   commit_hash: string | null;
   branch: string;
   file_count: number;
