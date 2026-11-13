@@ -14,6 +14,7 @@ import {
   Network,
   ShieldCheck,
   Terminal,
+  Eye,
 } from "lucide-react";
 import { useToast } from "@/app/_components/toast";
 
@@ -59,7 +60,27 @@ export function AnalysisDrawer({ analysis, onClose, onRetry }: AnalysisDrawerPro
     toast(`Copied ${label} to clipboard`, "success");
   };
 
-  const handleRetry = () => {
+  const handleRetry = async () => {
+    if (project?.repository_url) {
+      toast("Starting new analysis run...", "info");
+      try {
+        const res = await fetch("/api/analyze", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            repositoryUrl: project.repository_url,
+            forceRerun: true,
+          }),
+        });
+        const data = await res.json();
+        if (data.analysisId) {
+          window.location.href = `/analysis/${data.analysisId}`;
+          return;
+        }
+      } catch (err) {
+        console.error("Rerun failed:", err);
+      }
+    }
     if (onRetry) onRetry(analysis.id);
     toast("Analysis rerun initiated", "info");
   };
@@ -320,12 +341,19 @@ export function AnalysisDrawer({ analysis, onClose, onRetry }: AnalysisDrawerPro
             )}
           </div>
           <div className="flex items-center gap-2">
+            <a
+              href={`/analysis/${analysis.id}`}
+              className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-medium flex items-center gap-1.5 shadow-sm transition-colors"
+            >
+              <Eye className="w-3.5 h-3.5" />
+              <span>{analysis.status === "completed" ? "Explore Map" : "View Pipeline Progress"}</span>
+            </a>
             <button
               onClick={handleRetry}
-              className="px-3 py-1.5 rounded bg-[var(--color-accent)] text-white hover:opacity-90 font-medium flex items-center gap-1.5 shadow-sm transition-opacity"
+              className="px-3 py-1.5 rounded-lg bg-[var(--color-surface-sunken)] hover:bg-[var(--color-surface)] border border-[var(--color-border)] text-[var(--color-text)] font-medium flex items-center gap-1.5 transition-colors"
             >
               <RotateCw className="w-3.5 h-3.5" />
-              Rerun Analysis
+              Rerun
             </button>
           </div>
         </div>

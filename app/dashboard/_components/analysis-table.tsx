@@ -468,6 +468,13 @@ export function AnalysisTable({ analyses: initialAnalyses }: { analyses: Analysi
                               onClick={(e) => e.stopPropagation()}
                               className="absolute right-0 mt-1 w-44 rounded-md border border-[var(--color-border)] bg-[var(--color-surface-raised)] shadow-xl z-30 py-1 font-sans text-xs animate-in fade-in duration-100"
                             >
+                              <a
+                                href={`/analysis/${analysis.id}`}
+                                className="w-full px-3 py-1.5 flex items-center gap-2 hover:bg-[var(--color-surface-sunken)] text-left transition-colors text-blue-400 font-medium"
+                              >
+                                <Eye className="w-3.5 h-3.5" />
+                                {analysis.status === "completed" ? "Explore Map" : "View Pipeline"}
+                              </a>
                               <button
                                 onClick={() => {
                                   setSelectedAnalysis(analysis);
@@ -475,18 +482,8 @@ export function AnalysisTable({ analyses: initialAnalyses }: { analyses: Analysi
                                 }}
                                 className="w-full px-3 py-1.5 flex items-center gap-2 hover:bg-[var(--color-surface-sunken)] text-left transition-colors"
                               >
-                                <Eye className="w-3.5 h-3.5 text-[var(--color-text-muted)]" />
-                                View Analysis
-                              </button>
-                              <button
-                                onClick={() => {
-                                  setSelectedAnalysis(analysis);
-                                  setMenuOpenId(null);
-                                }}
-                                className="w-full px-3 py-1.5 flex items-center gap-2 hover:bg-[var(--color-surface-sunken)] text-left transition-colors font-mono text-[11px]"
-                              >
                                 <Terminal className="w-3.5 h-3.5 text-[var(--color-text-muted)]" />
-                                View Logs
+                                Drawer & Logs
                               </button>
                               {project?.repository_url && (
                                 <button

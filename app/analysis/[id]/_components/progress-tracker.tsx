@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useSession, useAuth } from "@clerk/nextjs";
 import { createBrowserSupabaseClient } from "@/utils/supabase/client";
@@ -108,6 +108,32 @@ export function ProgressTracker({ initialAnalysis, onCompleted }: ProgressTracke
   });
 
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const isRedirectingRef = useRef(false);
+
+  // Automatically navigate/reload to the interactive map upon completion
+  const handleCompletion = useCallback(() => {
+    if (isRedirectingRef.current) return;
+    isRedirectingRef.current = true;
+
+    setStatus("completed");
+    setCurrentStage("completed");
+    setStageMessage("Analysis complete! Rendering interactive map...");
+
+    setTimeout(() => {
+      if (onCompleted) {
+        onCompleted();
+      } else {
+        window.location.reload();
+      }
+    }, 600);
+  }, [onCompleted]);
+
+  // Immediate redirect if initial status was already completed
+  useEffect(() => {
+    if (initialAnalysis.status === "completed") {
+      handleCompletion();
+    }
+  }, [initialAnalysis.status, handleCompletion]);
 
   // Timer while running
   useEffect(() => {
@@ -122,6 +148,44 @@ export function ProgressTracker({ initialAnalysis, onCompleted }: ProgressTracke
     return () => clearInterval(interval);
   }, [status, initialAnalysis.created_at]);
 
+  // Polling fallback to guarantee completion is caught even if realtime drops
+  useEffect(() => {
+    if (status === "completed" || status === "failed") return;
+
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/analysis/${initialAnalysis.id}/status`, {
+          cache: "no-store",
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        const a = data.analysis;
+        if (!a) return;
+
+        if (a.stage) setCurrentStage(a.stage);
+        if (a.stage_message) setStageMessage(a.stage_message);
+        if (a.error_message) setErrorMessage(a.error_message);
+        if (a.file_count !== undefined && a.file_count !== null) {
+          setStats({
+            fileCount: a.file_count,
+            edgeCount: a.edge_count,
+            coverage: a.coverage_percentage,
+          });
+        }
+        if (a.status === "completed") {
+          handleCompletion();
+        } else if (a.status === "failed") {
+          setStatus("failed");
+          setFailedAtStage(a.failed_at_stage || a.stage);
+        }
+      } catch {
+        // Silently ignore network hiccup
+      }
+    }, 1500);
+
+    return () => clearInterval(interval);
+  }, [status, initialAnalysis.id, handleCompletion]);
+
   // Authenticated Supabase Client
   const supabase = useMemo(() => {
     if (!session) return null;
@@ -131,7 +195,7 @@ export function ProgressTracker({ initialAnalysis, onCompleted }: ProgressTracke
     );
   }, [session, orgId]);
 
-  // Realtime Broadcast Channel: analysis:<id>
+  // Realtime Broadcast Channel & Postgres Changes
   useEffect(() => {
     if (!supabase || status === "completed" || status === "failed") return;
 
@@ -159,15 +223,38 @@ export function ProgressTracker({ initialAnalysis, onCompleted }: ProgressTracke
         }
 
         if (data.status === "completed") {
-          setTimeout(() => {
-            if (onCompleted) {
-              onCompleted();
-            } else {
-              router.refresh();
-            }
-          }, 800);
+          handleCompletion();
         }
       })
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "analyses",
+          filter: `id=eq.${initialAnalysis.id}`,
+        },
+        (payload: any) => {
+          const newRow = payload.new;
+          if (!newRow) return;
+
+          if (newRow.stage) setCurrentStage(newRow.stage);
+          if (newRow.stage_message) setStageMessage(newRow.stage_message);
+          if (newRow.status) setStatus(newRow.status);
+          if (newRow.error_message) setErrorMessage(newRow.error_message);
+          if (newRow.file_count !== undefined && newRow.file_count !== null) {
+            setStats({
+              fileCount: newRow.file_count,
+              edgeCount: newRow.edge_count,
+              coverage: newRow.coverage_percentage,
+            });
+          }
+
+          if (newRow.status === "completed") {
+            handleCompletion();
+          }
+        }
+      )
       .subscribe((subscribeStatus) => {
         console.log(`[Realtime] Subscription to ${channelName}:`, subscribeStatus);
       });
@@ -175,7 +262,7 @@ export function ProgressTracker({ initialAnalysis, onCompleted }: ProgressTracke
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [supabase, initialAnalysis.id, status, onCompleted, router]);
+  }, [supabase, initialAnalysis.id, status, handleCompletion]);
 
   // Compute stage progression index
   const activeStageIdx = STAGE_ORDER[currentStage] ?? 0;
@@ -380,7 +467,7 @@ export function ProgressTracker({ initialAnalysis, onCompleted }: ProgressTracke
               if (onCompleted) {
                 onCompleted();
               } else {
-                router.refresh();
+                window.location.reload();
               }
             }}
             className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold flex items-center gap-2 transition-all shadow-sm shrink-0"

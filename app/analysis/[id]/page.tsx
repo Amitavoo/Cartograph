@@ -5,6 +5,9 @@ import { getStoredAnalysisData } from "@/src/pipeline/storage";
 import { ProgressTracker } from "./_components/progress-tracker";
 import { AnalysisExplorer } from "./_components/analysis-explorer";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 interface PageProps {
   params: Promise<{ id: string }>;
 }
@@ -47,7 +50,11 @@ export default async function AnalysisPage({ params }: PageProps) {
 
   // If already completed, load real stored files & edges from Postgres
   if (analysis.status === "completed") {
-    const storedGraphData = await getStoredAnalysisData(id);
+    let storedGraphData = await getStoredAnalysisData(id);
+    if (!storedGraphData || storedGraphData.files.length === 0) {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      storedGraphData = await getStoredAnalysisData(id);
+    }
 
     if (storedGraphData && storedGraphData.files.length > 0) {
       return (
