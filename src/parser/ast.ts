@@ -149,8 +149,11 @@ export class AstParser {
       if (fromMatch) {
         const mod = fromMatch[1];
         if (mod.startsWith(".")) {
-          // Relative import
-          const cleanMod = mod.replace(/^\./, "./");
+          // Relative import (e.g. .services -> ./services, ..database -> ../database)
+          const dotCount = (mod.match(/^\.+/) || ["."])[0].length;
+          const remainder = mod.slice(dotCount);
+          const prefix = dotCount === 1 ? "./" : "../".repeat(dotCount - 1);
+          const cleanMod = prefix + remainder;
           results.push({
             specifier: cleanMod,
             kind: "import",

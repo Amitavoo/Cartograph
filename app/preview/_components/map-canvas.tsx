@@ -584,6 +584,32 @@ export function MapCanvas({
     const activeNodes = new Set<string>();
     const activeEdges = new Set<string>();
 
+    if (selectedCategoryId) {
+      for (const node of nodes) {
+        const count = nodeMatchCounts.get(node.id) || 0;
+        const domCat = getNodeDominantCategory(node.files);
+        if (count > 0 || domCat === selectedCategoryId) {
+          activeNodes.add(node.id);
+        }
+      }
+
+      edges.forEach((e) => {
+        const srcNode = nodeMap.get(e.sourceNodeId);
+        const tgtNode = nodeMap.get(e.targetNodeId);
+        const srcMatch =
+          srcNode &&
+          ((nodeMatchCounts.get(srcNode.id) || 0) > 0 ||
+            getNodeDominantCategory(srcNode.files) === selectedCategoryId);
+        const tgtMatch =
+          tgtNode &&
+          ((nodeMatchCounts.get(tgtNode.id) || 0) > 0 ||
+            getNodeDominantCategory(tgtNode.files) === selectedCategoryId);
+        if (srcMatch || tgtMatch) {
+          activeEdges.add(e.id);
+        }
+      });
+    }
+
     if (activeTraversalSteps && activeTraversalSteps.length > 0) {
       for (const step of activeTraversalSteps) {
         const stepNode = fileToNodeMap.get(step.path);
@@ -662,6 +688,7 @@ export function MapCanvas({
       highlightedEdgeIds: activeEdges,
     };
   }, [
+    selectedCategoryId,
     selectedNodeId,
     selectedFilePath,
     hoveredNeighbourPath,
@@ -671,10 +698,13 @@ export function MapCanvas({
     rawEdges,
     fileToNodeMap,
     nodeMap,
+    nodes,
+    nodeMatchCounts,
   ]);
 
   const hasSelection = Boolean(
-    selectedNodeId ||
+    selectedCategoryId ||
+      selectedNodeId ||
       selectedFilePath ||
       hoveredNeighbourPath ||
       (activeTraversalSteps && activeTraversalSteps.length > 0) ||

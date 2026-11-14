@@ -137,14 +137,13 @@ export function AnalysisExplorer({
 
   const handleSelectCategory = (catId: string | null) => {
     setSelectedCategoryId(catId);
-    // When clearing/cancelling category filter, return back to repo resting state!
-    if (!catId) {
-      setSelectedNodeId(null);
-      setSelectedFile(null);
-      setActiveTraversal(null);
-      setActiveCyclePaths(null);
-      setHoveredNeighbourPath(null);
-    }
+    // When selecting or clearing a category filter, reset individual file/node selections
+    // so the view is clean and in resting state for that category or the whole repository.
+    setSelectedNodeId(null);
+    setSelectedFile(null);
+    setActiveTraversal(null);
+    setActiveCyclePaths(null);
+    setHoveredNeighbourPath(null);
   };
 
   const handleSelectNode = (nodeId: string | null) => {

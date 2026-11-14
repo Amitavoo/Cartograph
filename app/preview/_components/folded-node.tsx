@@ -32,9 +32,11 @@ export function FoldedNodeComponent({
 }: FoldedNodeProps) {
   const dominantCat = getNodeDominantCategory(node.files);
   const catStyle = getCategoryStyle(dominantCat);
+  const selectedCatStyle = selectedCategoryId ? getCategoryStyle(selectedCategoryId) : null;
 
   const isCategoryFiltered = Boolean(selectedCategoryId);
-  const effectiveDimmed = isDimmed || (isCategoryFiltered && matchedFilesCount === 0);
+  const isCategoryMatched = isCategoryFiltered && (matchedFilesCount > 0 || dominantCat === selectedCategoryId);
+  const effectiveDimmed = isDimmed || (isCategoryFiltered && !isCategoryMatched);
 
   return (
     <div
@@ -42,15 +44,21 @@ export function FoldedNodeComponent({
       style={{
         width: `${node.width}px`,
         height: `${node.height}px`,
-        boxShadow: isSelected ? `0 10px 25px -5px ${catStyle.glowHex}` : undefined,
+        boxShadow: isSelected
+          ? `0 10px 25px -5px ${catStyle.glowHex}`
+          : isCategoryMatched && selectedCatStyle
+          ? `0 10px 25px -5px ${selectedCatStyle.glowHex}`
+          : undefined,
       }}
       className={`group relative rounded-xl border p-3 flex flex-col justify-between cursor-grab active:cursor-grabbing select-none ${
         isBeingDragged ? "transition-none shadow-2xl scale-[1.02]" : "transition-all duration-200"
       } ${
         isSelected
           ? `${catStyle.borderClass} ${catStyle.bgClass} ring-1 ${catStyle.ringClass}`
+          : isCategoryMatched && selectedCatStyle
+          ? `${selectedCatStyle.borderClass} ${selectedCatStyle.bgClass} ring-1 ${selectedCatStyle.ringClass}`
           : "border-zinc-800 bg-zinc-900/90 hover:border-zinc-600 hover:bg-zinc-800/90 hover:shadow-md"
-      } ${effectiveDimmed ? "opacity-25 scale-[0.98] grayscale-[30%]" : "opacity-100 scale-100"}`}
+      } ${effectiveDimmed ? "opacity-20 scale-[0.98] grayscale-[40%]" : "opacity-100 scale-100"}`}
     >
       {/* Top row: Folder icon + File count / Matched count badge + Actions */}
       <div className="flex items-center justify-between gap-1.5 w-full">
@@ -59,9 +67,9 @@ export function FoldedNodeComponent({
             className={`w-6 h-6 rounded-md flex items-center justify-center shrink-0 ${
               isSelected
                 ? `${catStyle.color} text-white`
-                : isCategoryFiltered && matchedFilesCount > 0
-                ? catStyle.badgeBgClass
-                : "bg-zinc-800 text-zinc-300 group-hover:bg-zinc-700"
+                : isCategoryMatched && selectedCatStyle
+                ? `${selectedCatStyle.color} text-white shadow-sm`
+                : `${catStyle.badgeBgClass}`
             }`}
           >
             <Folder className="w-3.5 h-3.5" />
@@ -69,8 +77,8 @@ export function FoldedNodeComponent({
           {isCategoryFiltered ? (
             <span
               className={`text-[10px] font-mono font-medium px-1.5 py-0.5 rounded border shrink-0 ${
-                matchedFilesCount > 0
-                  ? catStyle.badgeBgClass + " font-semibold"
+                isCategoryMatched && selectedCatStyle
+                  ? selectedCatStyle.badgeBgClass + " font-semibold"
                   : "bg-zinc-800/80 text-zinc-500 border-zinc-700/60"
               }`}
             >
