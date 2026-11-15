@@ -1,10 +1,19 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { SignInButton } from "@clerk/nextjs";
-import { ArrowRight, GitBranch, AlertCircle, CheckCircle2, Play, ExternalLink } from "lucide-react";
+import {
+  ArrowRight,
+  GitBranch,
+  AlertCircle,
+  CheckCircle2,
+  Play,
+  ExternalLink,
+  Volume2,
+  VolumeX,
+} from "lucide-react";
 import { validateGitHubUrl } from "./types";
 
 interface HeroSectionProps {
@@ -13,11 +22,14 @@ interface HeroSectionProps {
 
 export function HeroSection({ isAuthenticated = false }: HeroSectionProps) {
   const router = useRouter();
+  const videoRef = useRef<HTMLVideoElement | null>(null);
   const [repoInput, setRepoInput] = useState("");
   const [validationError, setValidationError] = useState<string | null>(null);
   const [validatedRepo, setValidatedRepo] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isMuted, setIsMuted] = useState(true);
   const [videoError, setVideoError] = useState(false);
+  const [videoLoaded, setVideoLoaded] = useState(false);
 
   const sampleRepos = [
     "nestjs/nest",
@@ -56,6 +68,14 @@ export function HeroSection({ isAuthenticated = false }: HeroSectionProps) {
     }
   };
 
+  const toggleAudio = () => {
+    if (videoRef.current) {
+      const nextMuted = !videoRef.current.muted;
+      videoRef.current.muted = nextMuted;
+      setIsMuted(nextMuted);
+    }
+  };
+
   return (
     <section className="relative pt-12 pb-20 md:pt-20 md:pb-28 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto overflow-hidden">
       {/* 2-Column Split Layout (~42:58 Content to Media) */}
@@ -70,7 +90,10 @@ export function HeroSection({ isAuthenticated = false }: HeroSectionProps) {
 
           {/* Main Headline */}
           <h1 className="text-4xl sm:text-5xl lg:text-6xl font-extrabold tracking-tight text-[#F1F5F9] leading-[1.1] mb-6">
-            Turn your code into a <span className="italic text-[#EF3340] font-serif font-normal">living map.</span>
+            Turn your code into a{" "}
+            <span className="italic text-[#EF3340] font-serif font-normal">
+              living map.
+            </span>
           </h1>
 
           {/* Supporting Paragraph (Mandatory Text Measure: max-w-[64ch]) */}
@@ -173,28 +196,58 @@ export function HeroSection({ isAuthenticated = false }: HeroSectionProps) {
           </div>
         </div>
 
-        {/* Right Column (approx 58% / 7 cols of 12) — RESERVED FOR HERO VIDEO */}
+        {/* Right Column (approx 58% / 7 cols of 12) — ACTUAL HERO VIDEO FROM ASSETS */}
         <div className="lg:col-span-7 relative z-10 w-full">
-          <div className="relative rounded-2xl p-[1px] bg-gradient-to-br from-[#EF3340]/40 via-[#A855F7]/30 to-[#292D39] shadow-2xl shadow-black/80">
-            <div className="relative rounded-[15px] bg-[#10131C] overflow-hidden aspect-[16/10] flex items-center justify-center">
-              {/* HTML5 Video Element with Graceful Fallback */}
+          <div className="relative rounded-2xl p-[1px] bg-gradient-to-br from-[#EF3340]/40 via-[#EF3340]/20 to-[#292D39] shadow-2xl shadow-red-950/20">
+            <div className="relative rounded-[15px] bg-[#10131C] overflow-hidden aspect-[16/10] flex items-center justify-center group">
+              {/* HTML5 Video Element using the actual video from assets */}
               {!videoError ? (
                 <video
+                  ref={videoRef}
                   autoPlay
                   muted
                   loop
                   playsInline
+                  preload="auto"
+                  onLoadedData={() => setVideoLoaded(true)}
                   onError={() => setVideoError(true)}
                   className="w-full h-full object-cover rounded-[15px]"
                 >
-                  {/* Primary & secondary video source placeholder URLs */}
-                  <source src="/media/hero-architecture.mp4" type="video/mp4" />
-                  <source src="/media/hero-architecture.webm" type="video/webm" />
+                  <source src="/assets/cardograph-hero.mp4" type="video/mp4" />
+                  <source src="/cardograph-hero.mp4" type="video/mp4" />
                   Your browser does not support the video tag.
                 </video>
               ) : null}
 
-              {/* Graceful Fallback Overlay / In-Place Media Presentation */}
+              {/* Status Pill Badge at Top-Left */}
+              <div className="absolute top-3 left-3 z-20 flex items-center gap-2 px-2.5 py-1 rounded-full bg-[#090B10]/80 backdrop-blur-md border border-[#292D39]/80 text-[10px] font-mono text-[#F1F5F9] pointer-events-none select-none">
+                <span className="w-1.5 h-1.5 rounded-full bg-[#EF3340] animate-pulse" />
+                <span>ARCHITECTURE ENGINE</span>
+              </div>
+
+              {/* Speaker Toggle Button at Bottom-Right */}
+              {!videoError && (
+                <button
+                  id="hero-audio-toggle"
+                  type="button"
+                  onClick={toggleAudio}
+                  aria-label={isMuted ? "Unmute video sound" : "Mute video sound"}
+                  title={isMuted ? "Unmute audio" : "Mute audio"}
+                  className={`absolute bottom-3 right-3 z-20 p-2.5 rounded-xl backdrop-blur-md transition-all duration-200 border flex items-center justify-center cursor-pointer ${
+                    isMuted
+                      ? "bg-[#090B10]/85 border-[#292D39] text-[#A1A1AA] hover:text-[#F1F5F9] hover:border-zinc-700 hover:bg-[#171B25]"
+                      : "bg-[#EF3340] border-[#EF3340] text-white shadow-lg shadow-red-950/60 hover:bg-[#A91428]"
+                  }`}
+                >
+                  {isMuted ? (
+                    <VolumeX className="w-4 h-4" />
+                  ) : (
+                    <Volume2 className="w-4 h-4" />
+                  )}
+                </button>
+              )}
+
+              {/* Graceful Fallback if Video Cannot Load */}
               {videoError && (
                 <div className="absolute inset-0 bg-[#10131C] p-6 flex flex-col justify-between text-left">
                   <div className="flex items-center justify-between border-b border-[#292D39] pb-3">
@@ -203,7 +256,7 @@ export function HeroSection({ isAuthenticated = false }: HeroSectionProps) {
                       <span className="font-mono text-xs text-[#F1F5F9]">Cardograph Core Architecture Engine</span>
                     </div>
                     <span className="font-mono text-[10px] text-[#A1A1AA] uppercase tracking-wider">
-                      Video Ready
+                      Media Fallback
                     </span>
                   </div>
 
@@ -212,21 +265,21 @@ export function HeroSection({ isAuthenticated = false }: HeroSectionProps) {
                       <Play className="w-6 h-6 text-[#EF3340] ml-1" />
                     </div>
                     <p className="font-mono text-xs text-[#F1F5F9] max-w-[46ch]">
-                      Hero Architecture Intelligence Stream
+                      Cardograph Architecture Intelligence
                     </p>
                     <p className="text-[11px] text-[#A1A1AA] mt-1 max-w-[46ch]">
-                      Awaiting video source upload from production media bundle.
+                      Deterministic AST parsing and codebase dependency visualization.
                     </p>
                   </div>
 
                   <div className="flex items-center justify-between text-[11px] font-mono text-[#A1A1AA] border-t border-[#292D39] pt-3">
                     <span>Aspect: 16:10</span>
-                    <span>Format: H.264 / WebM</span>
+                    <span>Format: H.264 MP4</span>
                   </div>
                 </div>
               )}
 
-              {/* Subtle crimson overlay accent line */}
+              {/* Subtle Crimson Visual Border Overlay */}
               <div
                 className="pointer-events-none absolute inset-0 rounded-[15px] border border-[#EF3340]/20"
                 aria-hidden="true"
