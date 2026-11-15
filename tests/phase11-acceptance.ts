@@ -275,7 +275,7 @@ async function runPhase11AcceptanceChecks() {
   console.log(`    Metric 1: "${deterministicMetric.name}" -> Kind: [${deterministicMetric.kind.toUpperCase()}]`);
   console.log(`    Metric 2: "${subjectiveMetric.name}" -> Kind: [${subjectiveMetric.kind.toUpperCase()}]`);
 
-  if (deterministicMetric.kind === subjectiveMetric.kind) {
+  if ((deterministicMetric.kind as string) === (subjectiveMetric.kind as string)) {
     throw new Error("Check 9 Failed: Deterministic and subjective metrics are not distinguished");
   }
   console.log("    [PASS] Check 9: Deterministic metrics are explicitly distinguished from subjective assessments.\n");

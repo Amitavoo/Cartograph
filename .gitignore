@@ -23,3 +23,7 @@ next-env.d.ts
 
 # editor and local agent artifacts
 .aider-desk/
+
+# python
+__pycache__/
+*.pyc

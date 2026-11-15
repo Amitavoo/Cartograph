@@ -1,0 +1,26 @@
+{
+  "name": "deep-agent-quickstart",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "tsx agent.ts"
+  },
+  "dependencies": {
+    "@langchain/anthropic": "^1.6.5",
+    "@langchain/core": "^1.4.1",
+    "@langchain/google-genai": "^2.3.6",
+    "@langchain/langgraph": "^1.6.1",
+    "@langchain/openai": "^1.8.4",
+    "deepagents": "^1.16.5",
+    "dotenv": "^16.4.7",
+    "langchain": "^1.6.6",
+    "langsmith": "^0.12.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.23.15",
+    "typescript": "^5.0.0"
+  }
+}
