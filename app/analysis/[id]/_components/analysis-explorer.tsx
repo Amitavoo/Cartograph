@@ -323,6 +323,8 @@ export function AnalysisExplorer({
           onSelectCycle={handleSelectCycle}
           hoveredNeighbourPath={hoveredNeighbourPath}
           onHoverPath={setHoveredNeighbourPath}
+          analysisId={analysisId}
+          repositoryUrl={repositoryUrl}
         />
       </div>
     </div>
