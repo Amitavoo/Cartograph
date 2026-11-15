@@ -108,6 +108,8 @@ export async function POST(req: NextRequest) {
         tracingActive: result.tracingActive,
         model: result.model,
         target: modulePath || moduleLabel,
+        evaluation: result.evaluation,
+        traceId: result.traceId,
       });
     }
 
@@ -139,6 +141,8 @@ export async function POST(req: NextRequest) {
         tracingActive: result.tracingActive,
         model: result.model,
         target: filePath,
+        evaluation: result.evaluation,
+        traceId: result.traceId,
       });
     }
 
