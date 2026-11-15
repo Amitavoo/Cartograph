@@ -103,13 +103,13 @@ export default function PreviewPage() {
 
   const handleSelectCategory = (catId: string | null) => {
     setSelectedCategoryId(catId);
-    if (!catId) {
-      setSelectedNodeId(null);
-      setSelectedFile(null);
-      setActiveTraversal(null);
-      setActiveCyclePaths(null);
-      setHoveredNeighbourPath(null);
-    }
+    // When selecting or clearing a category filter, reset individual file/node selections
+    // so the view is clean and in resting state for that category or the whole repository.
+    setSelectedNodeId(null);
+    setSelectedFile(null);
+    setActiveTraversal(null);
+    setActiveCyclePaths(null);
+    setHoveredNeighbourPath(null);
   };
 
   const handleSelectNode = (nodeId: string | null) => {
@@ -177,6 +177,7 @@ export default function PreviewPage() {
       {/* 1. Header with dynamic repository title */}
       <PreviewHeader
         repoName={summary.name}
+        framework={summary.framework}
         filesCount={activeData.files.length}
         edgesCount={activeData.edges.length}
         foldersCount={activeData.folders.length}
@@ -200,11 +201,10 @@ export default function PreviewPage() {
               <button
                 type="button"
                 onClick={() => setCenterTab("map")}
-                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                  centerTab === "map"
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${centerTab === "map"
                     ? "bg-[var(--color-surface-raised)] text-[var(--color-text)] shadow-sm border border-[var(--color-border)]"
                     : "text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface-sunken)]"
-                }`}
+                  }`}
               >
                 <Network className="w-3.5 h-3.5 text-blue-400" />
                 <span>Map</span>
@@ -213,11 +213,10 @@ export default function PreviewPage() {
               <button
                 type="button"
                 onClick={() => setCenterTab("routes")}
-                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                  centerTab === "routes"
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${centerTab === "routes"
                     ? "bg-[var(--color-surface-raised)] text-[var(--color-text)] shadow-sm border border-[var(--color-border)]"
                     : "text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface-sunken)]"
-                }`}
+                  }`}
               >
                 <Route className="w-3.5 h-3.5 text-purple-400" />
                 <span>Routes</span>

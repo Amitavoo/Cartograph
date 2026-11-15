@@ -26,14 +26,42 @@ interface AnalysisExplorerProps {
   initialData: ParserOutput;
   coveragePercentage: number | null;
   repositoryName: string;
+  analysisId?: string;
+  repositoryUrl?: string;
+  commitHash?: string | null;
 }
 
 export function AnalysisExplorer({
   initialData,
   coveragePercentage,
   repositoryName,
+  analysisId,
+  repositoryUrl,
+  commitHash,
 }: AnalysisExplorerProps) {
   const [activeData, setActiveData] = useState<ParserOutput>(initialData);
+
+  const handleRerun = async () => {
+    if (!repositoryUrl) return;
+    try {
+      const res = await fetch("/api/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          repositoryUrl,
+          forceRerun: true,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.analysis?.id) {
+          window.location.href = `/analysis/${data.analysis.id}`;
+        }
+      }
+    } catch {
+      // ignore
+    }
+  };
 
   const categories = useMemo(
     () => deriveCategories(activeData.files),
@@ -109,14 +137,13 @@ export function AnalysisExplorer({
 
   const handleSelectCategory = (catId: string | null) => {
     setSelectedCategoryId(catId);
-    // When clearing/cancelling category filter, return back to repo resting state!
-    if (!catId) {
-      setSelectedNodeId(null);
-      setSelectedFile(null);
-      setActiveTraversal(null);
-      setActiveCyclePaths(null);
-      setHoveredNeighbourPath(null);
-    }
+    // When selecting or clearing a category filter, reset individual file/node selections
+    // so the view is clean and in resting state for that category or the whole repository.
+    setSelectedNodeId(null);
+    setSelectedFile(null);
+    setActiveTraversal(null);
+    setActiveCyclePaths(null);
+    setHoveredNeighbourPath(null);
   };
 
   const handleSelectNode = (nodeId: string | null) => {
@@ -175,9 +202,12 @@ export function AnalysisExplorer({
       {/* 1. Header with dynamic repository title */}
       <PreviewHeader
         repoName={summary.name}
+        framework={summary.framework}
         filesCount={activeData.files.length}
         edgesCount={activeData.edges.length}
         foldersCount={activeData.folders.length}
+        commitHash={commitHash}
+        onRerun={repositoryUrl ? handleRerun : undefined}
       />
 
       {/* 2. Coverage Banner (Displays when resolution coverage < 95%) */}

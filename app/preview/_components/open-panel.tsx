@@ -41,6 +41,7 @@ export function OpenPanelComponent({
 }: OpenPanelProps) {
   const dominantCat = getNodeDominantCategory(node.files);
   const catStyle = getCategoryStyle(dominantCat);
+  const selectedCatStyle = selectedCategoryId ? getCategoryStyle(selectedCategoryId) : null;
 
   // Category match count inside this folder
   const matchedFilesCount = useMemo(() => {
@@ -48,16 +49,25 @@ export function OpenPanelComponent({
     return node.files.filter((f) => getFileCategoryId(f.path) === selectedCategoryId).length;
   }, [node.files, selectedCategoryId]);
 
+  const isCategoryFiltered = Boolean(selectedCategoryId);
+  const isCategoryMatched = isCategoryFiltered && (matchedFilesCount > 0 || dominantCat === selectedCategoryId);
+
   return (
     <div
       style={{
         width: "320px",
-        boxShadow: isSelectedNode ? `0 10px 25px -5px ${catStyle.glowHex}` : undefined,
+        boxShadow: isSelectedNode
+          ? `0 10px 25px -5px ${catStyle.glowHex}`
+          : isCategoryMatched && selectedCatStyle
+          ? `0 10px 25px -5px ${selectedCatStyle.glowHex}`
+          : undefined,
       }}
       onWheel={(e) => e.stopPropagation()}
       className={`rounded-xl border shadow-2xl backdrop-blur-md overflow-hidden flex flex-col transition-shadow duration-200 select-none ${
         isSelectedNode
           ? `${catStyle.borderClass} bg-zinc-900 ring-2 ${catStyle.ringClass}`
+          : isCategoryMatched && selectedCatStyle
+          ? `${selectedCatStyle.borderClass} bg-zinc-900 ring-2 ${selectedCatStyle.ringClass}`
           : "border-zinc-700 bg-zinc-900/95 hover:border-zinc-500"
       } ${isDimmed ? "opacity-20 pointer-events-none scale-95" : "opacity-100 scale-100"}`}
     >
@@ -67,7 +77,15 @@ export function OpenPanelComponent({
         title="Drag header to move panel across canvas"
       >
         <div className="flex items-center gap-2 min-w-0 pointer-events-none">
-          <div className={`w-6 h-6 rounded-md ${catStyle.badgeBgClass} flex items-center justify-center shrink-0`}>
+          <div
+            className={`w-6 h-6 rounded-md ${
+              isSelectedNode
+                ? `${catStyle.color} text-white`
+                : isCategoryMatched && selectedCatStyle
+                ? `${selectedCatStyle.color} text-white`
+                : catStyle.badgeBgClass
+            } flex items-center justify-center shrink-0`}
+          >
             <FolderOpen className="w-3.5 h-3.5" />
           </div>
           <div className="min-w-0">

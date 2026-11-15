@@ -9,46 +9,86 @@ interface RoutesTableProps {
   routes: ExtractedRoute[];
   allFiles: ParsedFile[];
   onSelectFile?: (file: ParsedFile) => void;
+  onNavigateToMap?: () => void;
 }
 
-export function RoutesTable({ routes, allFiles, onSelectFile }: RoutesTableProps) {
+export function RoutesTable({
+  routes,
+  allFiles,
+  onSelectFile,
+  onNavigateToMap,
+}: RoutesTableProps) {
   const [searchQuery, setSearchQuery] = useState("");
+  const [selectedMethod, setSelectedMethod] = useState<string>("ALL");
+
+  const methodCounts = useMemo(() => {
+    const counts: Record<string, number> = { ALL: routes.length };
+    for (const r of routes) {
+      const m = r.method.toUpperCase();
+      counts[m] = (counts[m] || 0) + 1;
+    }
+    return counts;
+  }, [routes]);
+
+  const availableMethods = useMemo(() => {
+    const methods = ["ALL"];
+    const standard = ["GET", "POST", "PUT", "PATCH", "DELETE", "PAGE", "API"];
+    for (const s of standard) {
+      if (methodCounts[s]) methods.push(s);
+    }
+    // Any remaining methods
+    for (const m of Object.keys(methodCounts)) {
+      if (!methods.includes(m)) methods.push(m);
+    }
+    return methods;
+  }, [methodCounts]);
 
   const filteredRoutes = useMemo(() => {
-    if (!searchQuery.trim()) return routes;
-    const q = searchQuery.toLowerCase().trim();
-    return routes.filter(
-      (r) =>
+    return routes.filter((r) => {
+      // Method filter
+      if (selectedMethod !== "ALL" && r.method.toUpperCase() !== selectedMethod) {
+        return false;
+      }
+      // Text search
+      if (!searchQuery.trim()) return true;
+      const q = searchQuery.toLowerCase().trim();
+      return (
         r.pattern.toLowerCase().includes(q) ||
         r.role.toLowerCase().includes(q) ||
         r.handlerPath.toLowerCase().includes(q) ||
-        r.method.toLowerCase().includes(q)
-    );
-  }, [routes, searchQuery]);
+        r.method.toLowerCase().includes(q) ||
+        r.framework.toLowerCase().includes(q)
+      );
+    });
+  }, [routes, searchQuery, selectedMethod]);
 
   const handleRowClick = (handlerPath: string) => {
     if (!onSelectFile) return;
     const found = allFiles.find((f) => f.path === handlerPath);
     if (found) {
       onSelectFile(found);
+      if (onNavigateToMap) {
+        onNavigateToMap();
+      }
     }
   };
 
   const getMethodBadge = (method: string) => {
     switch (method.toUpperCase()) {
       case "GET":
-        return "bg-emerald-500/10 text-emerald-400 border-emerald-500/30";
-      case "POST":
         return "bg-blue-500/10 text-blue-400 border-blue-500/30";
-      case "PAGE":
-        return "bg-purple-500/10 text-purple-400 border-purple-500/30";
-      case "API":
-        return "bg-teal-500/10 text-teal-400 border-teal-500/30";
+      case "POST":
+        return "bg-emerald-500/10 text-emerald-400 border-emerald-500/30";
       case "PUT":
-      case "PATCH":
         return "bg-amber-500/10 text-amber-400 border-amber-500/30";
+      case "PATCH":
+        return "bg-purple-500/10 text-purple-400 border-purple-500/30";
       case "DELETE":
         return "bg-rose-500/10 text-rose-400 border-rose-500/30";
+      case "PAGE":
+        return "bg-indigo-500/10 text-indigo-400 border-indigo-500/30";
+      case "API":
+        return "bg-teal-500/10 text-teal-400 border-teal-500/30";
       default:
         return "bg-zinc-500/10 text-zinc-400 border-zinc-500/30";
     }
@@ -57,34 +97,67 @@ export function RoutesTable({ routes, allFiles, onSelectFile }: RoutesTableProps
   return (
     <div className="flex-1 flex flex-col h-full bg-[var(--color-surface)] overflow-hidden select-none">
       {/* Search & Stats Bar */}
-      <div className="p-4 border-b border-[var(--color-border)] bg-[var(--color-surface-sunken)]/40 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-purple-500/10 border border-purple-500/20 text-purple-400 flex items-center justify-center">
-            <Route className="w-4 h-4" />
+      <div className="p-4 border-b border-[var(--color-border)] bg-[var(--color-surface-sunken)]/40 flex flex-col gap-3">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-purple-500/10 border border-purple-500/20 text-purple-400 flex items-center justify-center">
+              <Route className="w-4 h-4" />
+            </div>
+            <div>
+              <h2 className="text-sm font-semibold text-[var(--color-text)] flex items-center gap-2">
+                <span>Extracted Framework Routes</span>
+                <span className="text-xs font-mono font-normal px-2 py-0.5 rounded-full bg-[var(--color-surface-raised)] border border-[var(--color-border)] text-[var(--color-text-muted)]">
+                  {routes.length} total
+                </span>
+              </h2>
+              <p className="text-[11px] text-[var(--color-text-muted)]">
+                HTTP methods, route endpoints, and handlers derived directly from source code.
+              </p>
+            </div>
           </div>
-          <div>
-            <h2 className="text-sm font-semibold text-[var(--color-text)] flex items-center gap-2">
-              <span>Extracted Framework Routes</span>
-              <span className="text-xs font-mono font-normal px-2 py-0.5 rounded-full bg-[var(--color-surface-raised)] border border-[var(--color-border)] text-[var(--color-text-muted)]">
-                {routes.length} total
-              </span>
-            </h2>
-            <p className="text-[11px] text-[var(--color-text-muted)]">
-              Routes derived directly from source file path conventions and controller annotations.
-            </p>
+
+          {/* Search input */}
+          <div className="relative w-full sm:w-64">
+            <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Filter routes or files..."
+              className="w-full pl-9 pr-3 py-1.5 rounded-lg text-xs bg-[var(--color-surface)] border border-[var(--color-border)] text-[var(--color-text)] placeholder-[var(--color-text-muted)] focus:outline-none focus:ring-1 focus:ring-purple-500"
+            />
           </div>
         </div>
 
-        {/* Search input */}
-        <div className="relative w-full sm:w-64">
-          <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]" />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Filter routes or files..."
-            className="w-full pl-9 pr-3 py-1.5 rounded-lg text-xs bg-[var(--color-surface)] border border-[var(--color-border)] text-[var(--color-text)] placeholder-[var(--color-text-muted)] focus:outline-none focus:ring-1 focus:ring-purple-500"
-          />
+        {/* Method Filter Pills */}
+        <div className="flex items-center gap-1.5 overflow-x-auto pt-1">
+          {availableMethods.map((m) => {
+            const isSelected = selectedMethod === m;
+            const count = methodCounts[m] || 0;
+            return (
+              <button
+                key={m}
+                type="button"
+                onClick={() => setSelectedMethod(m)}
+                className={`px-2.5 py-1 rounded-lg text-xs font-mono font-medium transition-all flex items-center gap-1.5 shrink-0 ${
+                  isSelected
+                    ? "bg-[var(--color-surface-raised)] text-[var(--color-text)] border border-purple-500/40 shadow-sm"
+                    : "bg-[var(--color-surface)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] border border-[var(--color-border)]"
+                }`}
+              >
+                <span>{m}</span>
+                <span
+                  className={`text-[10px] px-1.5 py-0.2 rounded-full ${
+                    isSelected
+                      ? "bg-purple-500/20 text-purple-300"
+                      : "bg-[var(--color-surface-sunken)] text-[var(--color-text-muted)]"
+                  }`}
+                >
+                  {count}
+                </span>
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -168,3 +241,4 @@ export function RoutesTable({ routes, allFiles, onSelectFile }: RoutesTableProps
     </div>
   );
 }
+
