@@ -213,6 +213,7 @@ export function HeroSection({ isAuthenticated = false }: HeroSectionProps) {
                   onError={() => setVideoError(true)}
                   className="w-full h-full object-cover rounded-[15px]"
                 >
+                  <source src="/assets/videos/cartograph-demo.mp4" type="video/mp4" />
                   <source src="/assets/cardograph-hero.mp4" type="video/mp4" />
                   <source src="/cardograph-hero.mp4" type="video/mp4" />
                   Your browser does not support the video tag.

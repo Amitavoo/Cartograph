@@ -1,3 +1,4 @@
+import * as os from "node:os";
 import * as path from "node:path";
 import puppeteer from "puppeteer-core";
 
@@ -18,6 +19,7 @@ async function verifyHeroVideo() {
   const browser = await puppeteer.launch({
     executablePath: EDGE_PATH,
     headless: true,
+    userDataDir: path.join(__dirname, "..", ".edge-profile"),
     defaultViewport: {
       width: 1440,
       height: 900,
@@ -34,8 +36,8 @@ async function verifyHeroVideo() {
     }
   });
 
-  page.on("pageerror", (err) => {
-    consoleErrors.push(err.message);
+  page.on("pageerror", (err: unknown) => {
+    consoleErrors.push(err instanceof Error ? err.message : String(err));
   });
 
   try {
