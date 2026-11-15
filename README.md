@@ -19,12 +19,18 @@
 ## Project Banner & Visual Overview
 
 <p align="center">
-  <img src="assets/cardograph_hero_banner.png" alt="Cartograph Public Landing Page & Interactive Architecture Engine" width="100%" />
+  <video src="https://github.com/Amitavoo/Cartograph/raw/main/assets/cardograph-hero.mp4" poster="assets/cardograph_hero_banner.png" controls="controls" muted="muted" autoplay="autoplay" loop="loop" width="100%">
+    <a href="assets/cardograph-hero.mp4">
+      <img src="assets/cardograph_hero_banner.png" alt="Cartograph Public Landing Page & Interactive Architecture Engine" width="100%" />
+    </a>
+  </video>
 </p>
 
+https://github.com/Amitavoo/Cartograph/raw/main/assets/cardograph-hero.mp4
+
 > **Live Video Demonstration:**  
-> 📺 **YouTube:** [Watch the Full Cartograph Architecture Walkthrough](https://youtu.be/-AkIj8TG3Uc)  
-> 🎥 **Demo Video Asset:** [`assets/cardograph-hero.mp4`](assets/cardograph-hero.mp4)
+> 🎥 **Direct Video File:** [`assets/cardograph-hero.mp4`](assets/cardograph-hero.mp4)  
+> 📺 **YouTube Walkthrough:** [Watch on YouTube](https://youtu.be/-AkIj8TG3Uc)
 
 ---
 
@@ -161,8 +167,14 @@ Cartograph eliminates this uncertainty by grounding every visual connection and 
 The entry point features a 2-column split hero with real-time GitHub URL validation, crimson brand identity (`#EF3340`), and an integrated demonstration video player with interactive sound toggle.
 
 <p align="center">
-  <img src="assets/cardograph_hero_banner.png" alt="Cartograph Landing Page Hero & Dashboard" width="100%" />
+  <video src="https://github.com/Amitavoo/Cartograph/raw/main/assets/cardograph-hero.mp4" poster="assets/cardograph_hero_banner.png" controls="controls" muted="muted" autoplay="autoplay" loop="loop" width="100%">
+    <a href="assets/cardograph-hero.mp4">
+      <img src="assets/cardograph_hero_banner.png" alt="Cartograph Landing Page Hero & Dashboard" width="100%" />
+    </a>
+  </video>
 </p>
+
+https://github.com/Amitavoo/Cartograph/raw/main/assets/cardograph-hero.mp4
 
 > 🎥 **Hero Demonstration Video:** Stored directly in [`assets/cardograph-hero.mp4`](assets/cardograph-hero.mp4) (integrated into the hero layout with autoplay, loop, and real-time audio toggle).
 
