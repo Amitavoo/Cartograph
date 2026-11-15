@@ -43,7 +43,9 @@ import {
   Database,
   Cpu,
   Loader2,
+  Bot,
 } from "lucide-react";
+import { AskPane } from "./ask-pane";
 
 interface DetailPaneProps {
   summary: RepositorySummary;
@@ -54,13 +56,13 @@ interface DetailPaneProps {
   rawEdges: Array<{ source: string; target: string; kind?: string }>;
   insights: RepositoryInsights;
   allFiles: ParsedFile[];
-  activeTab: "structure" | "explanation";
+  activeTab: "structure" | "explanation" | "ask";
   activeTraversal: {
     type: "blast" | "chain";
     file: ParsedFile;
     steps: TransitiveStep[];
   } | null;
-  onTabChange: (tab: "structure" | "explanation") => void;
+  onTabChange: (tab: "structure" | "explanation" | "ask") => void;
   onClearSelection: () => void;
   onSelectFile: (file: ParsedFile) => void;
   onSelectNode: (nodeId: string) => void;
@@ -524,6 +526,18 @@ export function DetailPane({
             <Sparkles className="w-3 h-3 text-blue-500" />
             <span>Explanation</span>
           </button>
+          <button
+            type="button"
+            onClick={() => onTabChange("ask")}
+            className={`px-3 py-1 rounded-md text-xs font-medium transition-all flex items-center gap-1.5 ${
+              activeTab === "ask"
+                ? "bg-[var(--color-surface)] text-[var(--color-text)] shadow-sm font-semibold"
+                : "text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+            }`}
+          >
+            <Bot className="w-3 h-3 text-emerald-500" />
+            <span>Ask</span>
+          </button>
         </div>
 
         {hasSelection && (
@@ -540,7 +554,20 @@ export function DetailPane({
 
       {/* 2. Pane Content Area */}
       <div className="flex-1 overflow-y-auto">
-        {activeTab === "explanation" ? (
+        {activeTab === "ask" ? (
+          <AskPane
+            analysisId={analysisId}
+            repositoryName={summary.name}
+            selectedFile={selectedFile}
+            onSelectPath={(filePath) => {
+              const fileObj = fileLookup.get(filePath);
+              if (fileObj) {
+                onSelectFile(fileObj);
+              }
+            }}
+            allFiles={allFiles}
+          />
+        ) : activeTab === "explanation" ? (
           /* ========================================================= */
           /* EXPLANATION TAB: Gemini 2.5 Flash Grounded Architectural   */
           /* ========================================================= */
