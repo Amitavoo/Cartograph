@@ -23,6 +23,9 @@ next-env.d.ts
 
 # editor and local agent artifacts
 .aider-desk/
+.edge-profile/
+scratch/
+assests/
 
 # python
 __pycache__/

@@ -13,6 +13,21 @@ export function NewAnalysisForm() {
   const [error, setError] = useState<string | null>(null);
   const isSubmittingRef = React.useRef(false);
 
+  React.useEffect(() => {
+    if (typeof window !== "undefined") {
+      const searchParams = new URLSearchParams(window.location.search);
+      const repoParam = searchParams.get("repo");
+      const pendingRepo = sessionStorage.getItem("cartograph_pending_repo");
+
+      if (repoParam) {
+        setUrl(repoParam);
+      } else if (pendingRepo) {
+        setUrl(pendingRepo);
+        sessionStorage.removeItem("cartograph_pending_repo");
+      }
+    }
+  }, []);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isSubmittingRef.current || isLoading) return;
