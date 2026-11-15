@@ -85,38 +85,21 @@ function MarkdownExplanationView({
   const lines = content.split("\n");
 
   return (
-    <div className="space-y-2.5 text-xs text-[var(--color-text)] leading-relaxed select-text">
+    <div className="space-y-2 text-xs text-[var(--color-text)] leading-relaxed select-text">
       {lines.map((line, idx) => {
-        const trimmed = line.trim();
-        if (!trimmed) return <div key={idx} className="h-1.5" />;
+        let trimmed = line.trim();
+        if (!trimmed) return <div key={idx} className="h-1" />;
 
-        if (trimmed.startsWith("### ")) {
-          return (
-            <h4
-              key={idx}
-              className="text-xs font-bold text-zinc-100 flex items-center gap-1.5 mt-3 pt-2 border-t border-[var(--color-border)]/50 text-blue-400"
-            >
-              <span>{trimmed.replace("### ", "")}</span>
-            </h4>
-          );
-        }
-
-        if (trimmed.startsWith("## ") || trimmed.startsWith("# ")) {
-          return (
-            <h3
-              key={idx}
-              className="text-sm font-bold text-zinc-100 mt-3 text-blue-400"
-            >
-              {trimmed.replace(/^#+\s*/, "")}
-            </h3>
-          );
+        // Strictly strip any stray heading hashes (#, ##, ###)
+        if (trimmed.startsWith("#")) {
+          trimmed = trimmed.replace(/^#+\s*/, "");
         }
 
         const isBullet = trimmed.startsWith("- ") || trimmed.startsWith("* ");
-        const textToRender = isBullet ? trimmed.substring(2) : trimmed;
+        const textToRender = isBullet ? trimmed.substring(2).trim() : trimmed;
 
-        // Parse bold and inline code segments
-        const parts = textToRender.split(/(`[^`]+`|\*\*[^*]+\*\*)/g);
+        // Parse inline code and bold segments
+        const tokens = textToRender.split(/(`[^`]+`|\*\*[^*]+\*\*)/g);
 
         return (
           <div
@@ -127,14 +110,16 @@ function MarkdownExplanationView({
               <span className="w-1.5 h-1.5 rounded-full bg-blue-500 shrink-0 mt-1.5" />
             )}
             <p className="flex-1">
-              {parts.map((part, pIdx) => {
-                if (part.startsWith("`") && part.endsWith("`")) {
-                  const rawCode = part.slice(1, -1);
+              {tokens.map((token, tIdx) => {
+                if (!token) return null;
+
+                if (token.startsWith("`") && token.endsWith("`")) {
+                  const rawCode = token.slice(1, -1);
                   const matchingFile = allFilesMap.get(rawCode);
                   if (matchingFile) {
                     return (
                       <button
-                        key={pIdx}
+                        key={tIdx}
                         type="button"
                         onClick={() => onSelectPath(matchingFile.path)}
                         className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 border border-blue-500/30 font-mono text-[11px] transition-colors cursor-pointer"
@@ -147,21 +132,47 @@ function MarkdownExplanationView({
                   }
                   return (
                     <code
-                      key={pIdx}
+                      key={tIdx}
                       className="px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-200 font-mono text-[11px] border border-zinc-700/60"
                     >
                       {rawCode}
                     </code>
                   );
                 }
-                if (part.startsWith("**") && part.endsWith("**")) {
+
+                if (token.startsWith("**") && token.endsWith("**")) {
                   return (
-                    <strong key={pIdx} className="font-semibold text-zinc-100">
-                      {part.slice(2, -2)}
+                    <strong key={tIdx} className="font-semibold text-zinc-100">
+                      {token.slice(2, -2)}
                     </strong>
                   );
                 }
-                return <span key={pIdx}>{part}</span>;
+
+                // In plain prose: detect any file paths matching repo files
+                const words = token.split(/(\s+)/);
+                return (
+                  <span key={tIdx}>
+                    {words.map((word, wIdx) => {
+                      const cleanWord = word.replace(/^[(`"']+|[)`"',.]+$/g, "");
+                      const matchingFile = allFilesMap.get(cleanWord);
+                      if (matchingFile) {
+                        return (
+                          <button
+                            key={wIdx}
+                            type="button"
+                            onClick={() => onSelectPath(matchingFile.path)}
+                            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 border border-blue-500/30 font-mono text-[11px] transition-colors cursor-pointer"
+                            title={`Select ${matchingFile.path} on canvas`}
+                          >
+                            <span>{cleanWord}</span>
+                            <ArrowUpRight className="w-2.5 h-2.5 opacity-70" />
+                          </button>
+                        );
+                      }
+                      return word;
+                    })}
+                  </span>
+                );
               })}
             </p>
           </div>
@@ -264,13 +275,31 @@ export function DetailPane({
     target: string;
     summary: string;
     cached: boolean;
+    isStale: boolean;
+    staleReason?: string;
     referencedFiles: string[];
+    tracingActive: boolean;
     loading: boolean;
     error: string | null;
   } | null>(null);
 
+  // AI-classified roles for unclassified files
+  const [aiRoles, setAiRoles] = useState<Map<string, string>>(new Map());
+
   const [copiedExplanation, setCopiedExplanation] = useState(false);
-  const cacheRef = React.useRef<Map<string, { summary: string; cached: boolean; referencedFiles: string[] }>>(new Map());
+  const cacheRef = React.useRef<
+    Map<
+      string,
+      {
+        summary: string;
+        cached: boolean;
+        isStale: boolean;
+        staleReason?: string;
+        referencedFiles: string[];
+        tracingActive: boolean;
+      }
+    >
+  >(new Map());
 
   const fetchExplanation = React.useCallback(
     async (force = false) => {
@@ -289,7 +318,10 @@ export function DetailPane({
           target: targetIdentifier,
           summary: cached.summary,
           cached: cached.cached,
+          isStale: cached.isStale,
+          staleReason: cached.staleReason,
           referencedFiles: cached.referencedFiles,
+          tracingActive: cached.tracingActive,
           loading: false,
           error: null,
         });
@@ -300,7 +332,9 @@ export function DetailPane({
         target: targetIdentifier,
         summary: prev?.target === targetIdentifier ? prev.summary : "",
         cached: false,
+        isStale: false,
         referencedFiles: prev?.target === targetIdentifier ? prev.referencedFiles : [],
+        tracingActive: false,
         loading: true,
         error: null,
       }));
@@ -317,19 +351,18 @@ export function DetailPane({
         if (selectedFile) {
           const incoming = relIndex.dependentsByFile.get(selectedFile.path) || [];
           const outgoing = relIndex.importsByFile.get(selectedFile.path) || [];
-          const blast = computeTransitiveWalk(selectedFile.path, rawEdges as any, "upstream", 2).map((s) => s.path);
           const convention = classifyFileConvention(selectedFile.path);
 
           payload = {
             ...payload,
             filePath: selectedFile.path,
+            contentHash: selectedFile.contentHash,
             lines: selectedFile.lines,
             category: convention.label,
             fanIn: selectedFile.fanIn,
             fanOut: selectedFile.fanOut,
             incomingNeighbors: incoming,
             outgoingNeighbors: outgoing,
-            blastRadius: blast,
           };
         } else if (selectedNode) {
           const incomingNodes = edges.filter((e) => e.targetNodeId === selectedNode.id).map((e) => e.sourceNodeId);
@@ -339,13 +372,13 @@ export function DetailPane({
             ...payload,
             modulePath: selectedNode.fullPath || selectedNode.id,
             moduleLabel: selectedNode.label,
+            filesContained: selectedNode.files.map((f) => ({ name: f.name, path: f.path, lines: f.lines })),
             lines: selectedNode.totalLines,
             category: "Folded Module",
             fanIn: selectedNode.fanIn,
             fanOut: selectedNode.fanOut,
             incomingNeighbors: incomingNodes,
             outgoingNeighbors: outgoingNodes,
-            blastRadius: [],
           };
         }
 
@@ -364,14 +397,20 @@ export function DetailPane({
           const record = {
             summary: data.summary,
             cached: Boolean(data.cached),
+            isStale: Boolean(data.isStale),
+            staleReason: data.staleReason,
             referencedFiles: data.referencedFiles || [],
+            tracingActive: Boolean(data.tracingActive),
           };
           cacheRef.current.set(cacheKey, record);
           setExplanationState({
             target: targetIdentifier,
             summary: data.summary,
             cached: Boolean(data.cached),
+            isStale: Boolean(data.isStale),
+            staleReason: data.staleReason,
             referencedFiles: data.referencedFiles || [],
+            tracingActive: Boolean(data.tracingActive),
             loading: false,
             error: null,
           });
@@ -383,7 +422,9 @@ export function DetailPane({
           target: targetIdentifier,
           summary: prev?.summary || "",
           cached: false,
+          isStale: false,
           referencedFiles: prev?.referencedFiles || [],
+          tracingActive: false,
           loading: false,
           error: err.message || "Failed to load explanation",
         }));
@@ -391,6 +432,33 @@ export function DetailPane({
     },
     [analysisId, selectedFile, selectedNode, summary, relIndex, rawEdges, edges, allFiles]
   );
+
+  // Auto-classify unclassified files
+  React.useEffect(() => {
+    if (!selectedFile) return;
+    const convention = classifyFileConvention(selectedFile.path);
+    if (convention.kind === "unclassified" && !aiRoles.has(selectedFile.path)) {
+      fetch("/api/explain", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "classify",
+          analysisId,
+          filePath: selectedFile.path,
+          lines: selectedFile.lines,
+          incomingNeighbors: relIndex.dependentsByFile.get(selectedFile.path) || [],
+          outgoingNeighbors: relIndex.importsByFile.get(selectedFile.path) || [],
+        }),
+      })
+        .then((r) => r.json())
+        .then((data) => {
+          if (data.success && data.role) {
+            setAiRoles((prev) => new Map(prev).set(selectedFile.path, data.role));
+          }
+        })
+        .catch(() => {});
+    }
+  }, [selectedFile, analysisId, relIndex, aiRoles]);
 
   React.useEffect(() => {
     if (activeTab === "explanation" && (selectedFile || selectedNode)) {
@@ -544,10 +612,29 @@ export function DetailPane({
                   {/* Target File Header */}
                   <div className="p-3 rounded-xl bg-[var(--color-surface-sunken)] border border-[var(--color-border)] space-y-2">
                     <div className="flex items-center justify-between">
-                      <span className={`text-[10px] font-mono px-2 py-0.5 rounded border font-medium ${classification.color}`}>
-                        {classification.label}
-                      </span>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className={`text-[10px] font-mono px-2 py-0.5 rounded border font-medium ${classification.color}`}>
+                          {classification.label}
+                        </span>
+                        {aiRoles.has(selectedFile.path) && (
+                          <span className="text-[10px] font-mono px-2 py-0.5 rounded border border-purple-500/30 bg-purple-500/10 text-purple-300 font-medium">
+                            Role: {aiRoles.get(selectedFile.path)}
+                          </span>
+                        )}
+                      </div>
                       <div className="flex items-center gap-1">
+                        {explanationState?.tracingActive ? (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" title="Traced to LangSmith">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                            <span>Traced</span>
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 border border-zinc-700" title="LangSmith tracing unconfigured">
+                            <span className="w-1.5 h-1.5 rounded-full bg-zinc-500" />
+                            <span>Tracing unconfigured</span>
+                          </span>
+                        )}
+
                         {explanationState?.cached ? (
                           <span className="inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
                             <Database className="w-2.5 h-2.5" />
@@ -593,6 +680,23 @@ export function DetailPane({
                       {selectedFile.path}
                     </div>
                   </div>
+
+                  {/* Staleness Banner */}
+                  {explanationState?.isStale && (
+                    <div className="p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-300 text-xs flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
+                        <span className="truncate">Explanation is stale ({explanationState.staleReason || "file changed"}).</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => fetchExplanation(true)}
+                        className="px-2 py-0.5 rounded bg-amber-500/20 hover:bg-amber-500/30 text-[11px] font-semibold transition-colors shrink-0"
+                      >
+                        Re-analyse
+                      </button>
+                    </div>
+                  )}
 
                   {/* Loading Skeleton */}
                   {explanationState?.loading && (
@@ -745,6 +849,18 @@ export function DetailPane({
                         Folded Module
                       </span>
                       <div className="flex items-center gap-1">
+                        {explanationState?.tracingActive ? (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" title="Traced to LangSmith">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                            <span>Traced</span>
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 border border-zinc-700" title="LangSmith tracing unconfigured">
+                            <span className="w-1.5 h-1.5 rounded-full bg-zinc-500" />
+                            <span>Tracing unconfigured</span>
+                          </span>
+                        )}
+
                         {explanationState?.cached ? (
                           <span className="inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
                             <Database className="w-2.5 h-2.5" />

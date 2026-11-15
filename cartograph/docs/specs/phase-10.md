@@ -1,42 +1,66 @@
-# Phase 10 — AI Explanations and Walkthroughs
+# Phase 10 — Explain, cached and traced
 
-**Goal.** Ask for an explanation of any file or module on the map and get a concise, grounded architectural paragraph written from that file and its real neighbours, backed by database caching and hallucination prevention.
+**Goal.** The first model call, and everything that has to be true around it.
 
 ## Build
 
-- **Explanation API route (`/api/explain`)**:
-  - Connects to Google Gemini (`gemini-2.5-flash`) using `GEMINI_API_KEY`.
-  - Feeds the model the target file's concrete structural facts: category/role, lines of code, real incoming consumers (`fan-in`), real outgoing dependencies (`fan-out`), and 2-level blast radius calculated by graph arithmetic.
-  - Strict grounding prompt: instructions never to invent imports, consumers, or files that do not exist in the repository's parsed graph.
-  - Hallucination detector: validates all referenced file paths against the repository's known file list before returning.
-  - Database cache in `public.explanations`: checks `(analysis_id, file_id)` before calling the model; saves newly generated explanations with content hashes.
-- **Detail Pane Explanation Tab (`app/preview/_components/detail-pane.tsx`)**:
-  - Active tab toggle between **Structure** and **✨ Explanation**.
-  - **Resting state (no selection)**: Shows a repository architectural overview and guidance to select any file or folded module to inspect its role.
-  - **Selected File / Module state**:
-    - Explains what the file does and why it exists.
-    - Highlights key incoming and outgoing architectural relationships.
-    - Communicates blast radius and change impact.
-    - Badges for referenced dependencies that are clickable to navigate the canvas.
-    - Cache indicator badge (`⚡ Cached` vs `✨ AI Generated`).
-    - "Regenerate" button to re-run or refresh the explanation.
-    - Preserves active tab state across file and module selections.
+- One place in the entire codebase that constructs the AI client, wrapped so
+  every call through it is traced.
+- **Explaining a file**, written from that file's real neighbours — the things
+  it imports and the things importing it, all of them handed to the model.
+- **Explaining a folded folder**, which is a different question: what's in here,
+  and why does so much point at it.
+- Assigning roles to files no adapter could identify.
+- A cache for both, keyed on the content of the thing being explained.
+- **An explanation already fetched stays in the pane.** Move the selection
+  away, come back, and it is still there without a second click. A cache
+  nobody can feel is not a cache.
+- **Rendering the explanation.** The prompt permits exactly three pieces of
+  formatting — inline code, bullets and bold — and no headings, because the pane
+  is narrow and headings cut a few short paragraphs into labelled fragments.
+  Render those three, and turn every repository path in the prose into a link
+  that moves the map.
+- **Staleness.** Each explained file's stored content hash is checked against
+  the repository. If the file has changed, or the repository has moved past the
+  commit that was analysed, say so and offer to re-analyse.
 
 ## Constraints
 
-- **The AI may explain and label. It may never decide that two files are connected, and it may never walk the graph when arithmetic can do it instead.**
-- **Caching is not optional.** Every generated explanation is persisted in `public.explanations`. Re-selecting a file reads from cache instantly without invoking an LLM.
-- **A check on whether the AI ever names a file that doesn't exist.** If a generated explanation cites a nonexistent file path, it is detected and sanitized.
-- Selecting a file or switching tabs does not freeze or block the UI; loading states use smooth skeletons.
+- The model may explain and label. It may not decide that two files are
+  connected, and it may not walk the graph. Every path it sees was handed to it.
+- **The cache read happens inside the traced call**, not before it. A cache hit
+  must appear in the traces as a recorded run containing no model call —
+  otherwise there's no way to tell a working cache from a broken one.
+- Model versions are pinned exactly, never to a moving alias, and the model
+  name is part of the cache key. Re-pinning one invalidates only its own cache.
+- Classification may only answer with roles that are _not_ structural. It may
+  say service, repository, model, util, config, component or hook. It may never
+  say page, route or controller — those decide the route table and the
+  entry-point colouring, and convention owns them.
+- Don't forbid formatting outright and print whatever comes back. Models don't
+  reliably obey that, and the result is backticks rendered as backticks —
+  markdown with the renderer missing. Permitting a small subset and rendering it
+  is the option that survives contact.
+- If tracing is unconfigured, calls still succeed. Make that state visible
+  somewhere, because an absent key otherwise looks exactly like a working setup
+  with no traffic.
 
 ## Acceptance check
 
-1. Open a mapped repository, select any file, and click the **Explanation** tab.
-2. The pane generates or loads a grounded architectural summary describing its role, why it imports its dependencies, and what breaks if it changes.
-3. Switch to another file and return: the explanation loads instantly from cache with 0 LLM calls.
-4. Click on any dependency mentioned in the explanation pane: the map highlights and focuses that file.
-5. Tab state is preserved when clicking between nodes and files.
+1. Click **Explain** on a file: a paragraph describing what it does in the
+   context of its actual neighbours. It names files that are genuinely its
+   neighbours, and clicking one of those names moves the map to it.
+2. No stray backticks, asterisks or hash symbols anywhere in the rendered
+   output.
+3. Click it again: instant. Then open the tracing dashboard — both runs are
+   there, and the second one records zero tokens.
+4. Explain a folded folder. The answer is about the folder, not a summary of
+   one file in it.
+5. Push a commit to the analysed repository, reload, click Explain on the file
+   you changed. It says the explanation is stale and offers to re-analyse.
+6. Find a file no adapter matched. It has a sensible role, and that role is not
+   a routable one.
 
 ## Not in this phase
 
-Interactive multi-turn repository chat (Phase 11).
+Measuring whether any of this is any good. That comes next.
