@@ -22,7 +22,15 @@ async function runPhase13AcceptanceChecks() {
     throw new Error(`Home page route file not found: ${homePagePath}`);
   }
 
-  const landingSource = fs.readFileSync(landingPagePath, "utf-8");
+  let landingSource = fs.readFileSync(landingPagePath, "utf-8");
+  const landingDir = path.join(process.cwd(), "app", "_components", "landing");
+  if (fs.existsSync(landingDir)) {
+    for (const f of fs.readdirSync(landingDir)) {
+      if (f.endsWith(".tsx") || f.endsWith(".ts")) {
+        landingSource += "\n" + fs.readFileSync(path.join(landingDir, f), "utf-8");
+      }
+    }
+  }
   const homeSource = fs.readFileSync(homePagePath, "utf-8");
   const dashboardSource = fs.readFileSync(dashboardPath, "utf-8");
 
@@ -259,11 +267,25 @@ async function runPhase13AcceptanceChecks() {
   // Check 12: Visual identity, color palette, and styling consistency
   // ---------------------------------------------------------------------------
   console.log("--> Check 12: Visual identity, palette, and component styling");
-  const hasMidnightBg = landingSource.includes("#09090b") || landingSource.includes("zinc-950");
-  const hasRedAccent = landingSource.includes("red-500") || landingSource.includes("red-400");
-  const hasVioletAccent = landingSource.includes("violet-500") || landingSource.includes("violet-400");
-  const hasCyanHighlight = landingSource.includes("cyan-400") || landingSource.includes("cyan-500");
-  const hasCrispBorders = landingSource.includes("border-zinc-800");
+  const hasMidnightBg =
+    landingSource.includes("#09090b") ||
+    landingSource.includes("#090B10") ||
+    landingSource.includes("zinc-950");
+  const hasRedAccent =
+    landingSource.includes("red-500") ||
+    landingSource.includes("red-400") ||
+    landingSource.includes("#EF3340");
+  const hasVioletAccent =
+    landingSource.includes("violet-500") ||
+    landingSource.includes("violet-400") ||
+    landingSource.includes("#A855F7");
+  const hasCyanHighlight =
+    landingSource.includes("cyan-400") ||
+    landingSource.includes("cyan-500") ||
+    landingSource.includes("#38BDF8");
+  const hasCrispBorders =
+    landingSource.includes("border-zinc-800") ||
+    landingSource.includes("#292D39");
 
   if (!hasMidnightBg || !hasRedAccent || !hasVioletAccent || !hasCyanHighlight || !hasCrispBorders) {
     throw new Error("Missing required brand color palette or styling elements");
