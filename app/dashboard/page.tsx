@@ -5,6 +5,7 @@ import { AnalyticsOverview } from "./_components/analytics-overview";
 import { AnalyticsCharts } from "./_components/analytics-charts";
 import { AnalysisTable } from "./_components/analysis-table";
 import { AnalysisRecord } from "./_components/analysis-drawer";
+import { NewAnalysisForm } from "./_components/new-analysis-form";
 
 async function WorkspaceHome() {
   const { orgId, orgSlug, userId, sessionClaims } = await auth.protect();
@@ -58,6 +59,10 @@ async function WorkspaceHome() {
     .select(`
       id,
       status,
+      stage,
+      stage_message,
+      failed_at_stage,
+      updated_at,
       commit_hash,
       branch,
       file_count,
@@ -81,8 +86,8 @@ async function WorkspaceHome() {
   const metrics = {
     total: analyses.length,
     completed: analyses.filter((a) => a.status === "completed").length,
-    running: analyses.filter((a) => ["running", "parsing", "analyzing", "cloning"].includes(a.status)).length,
-    queued: analyses.filter((a) => a.status === "pending").length,
+    running: analyses.filter((a) => ["running", "parsing", "analyzing", "cloning", "fetching", "selecting", "storing"].includes(a.status)).length,
+    queued: analyses.filter((a) => a.status === "pending" || a.stage === "queued").length,
     failed: analyses.filter((a) => a.status === "failed").length,
   };
 
@@ -96,7 +101,7 @@ async function WorkspaceHome() {
               Repository Analyses
             </h1>
             <span className="text-[10px] font-mono px-1.5 py-0.5 rounded border border-[var(--color-border)] bg-[var(--color-surface-sunken)] text-[var(--color-text-muted)]">
-              Phase 2
+              Phase 7
             </span>
           </div>
           <p className="mt-1 text-xs text-[var(--color-text-muted)]">
@@ -121,7 +126,7 @@ async function WorkspaceHome() {
         <div className="flex items-center gap-2">
           <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-mono text-[var(--color-text-muted)] bg-[var(--color-surface-raised)] border border-[var(--color-border)]">
             <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-            Postgres RLS Enforced
+            Live Pipeline &amp; RLS Enforced
           </span>
         </div>
       </div>
@@ -132,6 +137,9 @@ async function WorkspaceHome() {
           Database query error: {error.message}
         </div>
       )}
+
+      {/* Phase 7: New Repository Analysis Submission Form */}
+      <NewAnalysisForm />
 
       {/* Overview Analytics Cards */}
       <AnalyticsOverview metrics={metrics} />

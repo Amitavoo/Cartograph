@@ -11,6 +11,7 @@ import {
   ArrowDownRight,
   ArrowUpRight,
   Layers,
+  ArrowRightLeft,
 } from "lucide-react";
 
 interface OpenPanelProps {
@@ -19,9 +20,11 @@ interface OpenPanelProps {
   selectedCategoryId?: string | null;
   isSelectedNode: boolean;
   isDimmed: boolean;
+  isMovedToSide?: boolean;
   onClose: () => void;
   onSelectNode: () => void;
   onSelectFile: (file: ParsedFile, e: React.MouseEvent) => void;
+  onMoveToSide?: () => void;
 }
 
 export function OpenPanelComponent({
@@ -30,9 +33,11 @@ export function OpenPanelComponent({
   selectedCategoryId,
   isSelectedNode,
   isDimmed,
+  isMovedToSide = false,
   onClose,
   onSelectNode,
   onSelectFile,
+  onMoveToSide,
 }: OpenPanelProps) {
   // Category match count inside this folder
   const matchedFilesCount = useMemo(() => {
@@ -79,6 +84,26 @@ export function OpenPanelComponent({
               {node.fileCount} files
             </span>
           )}
+
+          {isSelectedNode && onMoveToSide && (
+            <button
+              type="button"
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                onMoveToSide();
+              }}
+              title={isMovedToSide ? "Restore node position" : "Move to side & view links"}
+              className={`p-1 rounded transition-colors ${
+                isMovedToSide
+                  ? "text-blue-400 bg-blue-500/20 hover:bg-blue-500/30 ring-1 ring-blue-500/40"
+                  : "text-zinc-400 hover:text-blue-400 hover:bg-zinc-700"
+              }`}
+            >
+              <ArrowRightLeft className="w-3.5 h-3.5" />
+            </button>
+          )}
+
           <button
             type="button"
             onMouseDown={(e) => e.stopPropagation()}
@@ -113,6 +138,7 @@ export function OpenPanelComponent({
       {/* 3. Fully Scrollable File Rows List */}
       <div
         data-panel-scroll="true"
+        onMouseDown={(e) => e.stopPropagation()}
         onWheel={(e) => e.stopPropagation()}
         className="p-1.5 space-y-0.5 max-h-80 overflow-y-auto overscroll-contain pr-1 custom-scrollbar"
       >
