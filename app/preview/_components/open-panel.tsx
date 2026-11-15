@@ -3,7 +3,7 @@
 import React, { useMemo } from "react";
 import { FoldedNode } from "@/src/folding/types";
 import { ParsedFile } from "@/src/parser/types";
-import { getFileCategoryId } from "@/src/scaffolding/categories";
+import { getFileCategoryId, getNodeDominantCategory, getCategoryStyle } from "@/src/scaffolding/categories";
 import {
   FolderOpen,
   ChevronDown,
@@ -39,6 +39,9 @@ export function OpenPanelComponent({
   onSelectFile,
   onMoveToSide,
 }: OpenPanelProps) {
+  const dominantCat = getNodeDominantCategory(node.files);
+  const catStyle = getCategoryStyle(dominantCat);
+
   // Category match count inside this folder
   const matchedFilesCount = useMemo(() => {
     if (!selectedCategoryId) return 0;
@@ -47,11 +50,14 @@ export function OpenPanelComponent({
 
   return (
     <div
-      style={{ width: "320px" }}
+      style={{
+        width: "320px",
+        boxShadow: isSelectedNode ? `0 10px 25px -5px ${catStyle.glowHex}` : undefined,
+      }}
       onWheel={(e) => e.stopPropagation()}
       className={`rounded-xl border shadow-2xl backdrop-blur-md overflow-hidden flex flex-col transition-shadow duration-200 select-none ${
         isSelectedNode
-          ? "border-blue-500 bg-zinc-900 ring-2 ring-blue-500/50 shadow-blue-500/20"
+          ? `${catStyle.borderClass} bg-zinc-900 ring-2 ${catStyle.ringClass}`
           : "border-zinc-700 bg-zinc-900/95 hover:border-zinc-500"
       } ${isDimmed ? "opacity-20 pointer-events-none scale-95" : "opacity-100 scale-100"}`}
     >
@@ -61,11 +67,11 @@ export function OpenPanelComponent({
         title="Drag header to move panel across canvas"
       >
         <div className="flex items-center gap-2 min-w-0 pointer-events-none">
-          <div className="w-6 h-6 rounded-md bg-blue-500/20 border border-blue-500/40 text-blue-400 flex items-center justify-center shrink-0">
+          <div className={`w-6 h-6 rounded-md ${catStyle.badgeBgClass} flex items-center justify-center shrink-0`}>
             <FolderOpen className="w-3.5 h-3.5" />
           </div>
           <div className="min-w-0">
-            <div className="text-xs font-semibold text-zinc-100 truncate group-hover:text-blue-400 transition-colors">
+            <div className={`text-xs font-semibold text-zinc-100 truncate group-hover:${catStyle.textClass} transition-colors`}>
               {node.label}
             </div>
             <div className="text-[10px] font-mono text-zinc-400 truncate">

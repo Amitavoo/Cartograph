@@ -3,7 +3,12 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import { FoldedNode, NodeEdge } from "@/src/folding/types";
 import { ParsedFile, ParserOutput } from "@/src/parser/types";
-import { getFileCategoryId } from "@/src/scaffolding/categories";
+import {
+  getFileCategoryId,
+  getNodeDominantCategory,
+  getCategoryStyle,
+  CATEGORY_STYLES,
+} from "@/src/scaffolding/categories";
 import { FoldedNodeComponent } from "./folded-node";
 import { OpenPanelComponent } from "./open-panel";
 import {
@@ -83,7 +88,7 @@ export function MapCanvas({
 
   // Canvas background panning state
   const [isCanvasPanning, setIsCanvasPanning] = useState(false);
-  const canvasPanStart = useRef({ x: 0, y: 0, initialX: 0, initialY: 0 });
+  const canvasPanStart = useRef({ x: 0, y: 0, initialX: 0, initialY: 0, hasMoved: false });
 
   // Node dragging state
   const [draggedNodeId, setDraggedNodeId] = useState<string | null>(null);
@@ -425,6 +430,7 @@ export function MapCanvas({
         y: e.clientY,
         initialX: transformRef.current.x,
         initialY: transformRef.current.y,
+        hasMoved: false,
       };
     }
   };
@@ -459,6 +465,10 @@ export function MapCanvas({
       if (isCanvasPanning) {
         const dx = e.clientX - canvasPanStart.current.x;
         const dy = e.clientY - canvasPanStart.current.y;
+        if (Math.hypot(dx, dy) > 4) {
+          canvasPanStart.current.hasMoved = true;
+        }
+
         setTransform((prev) => ({
           ...prev,
           x: canvasPanStart.current.initialX + dx,
@@ -478,6 +488,11 @@ export function MapCanvas({
         setDraggedNodeId(null);
       }
       if (isCanvasPanning) {
+        if (!canvasPanStart.current.hasMoved) {
+          // Clicked empty canvas background without panning: return to repo resting state!
+          onSelectNode(null);
+          onSelectFile(null);
+        }
         setIsCanvasPanning(false);
       }
     };
@@ -834,6 +849,20 @@ export function MapCanvas({
             >
               <path d="M 0 1 L 9 5 L 0 9 z" fill="#3b82f6" />
             </marker>
+            {Object.entries(CATEGORY_STYLES).map(([catId, catStyle]) => (
+              <marker
+                key={catId}
+                id={`edge-arrow-${catId}`}
+                viewBox="0 0 10 10"
+                refX="8"
+                refY="5"
+                markerWidth="7"
+                markerHeight="7"
+                orient="auto-start-reverse"
+              >
+                <path d="M 0 1 L 9 5 L 0 9 z" fill={catStyle.hex} />
+              </marker>
+            ))}
           </defs>
 
           {edges.map((edge) => {
@@ -865,15 +894,37 @@ export function MapCanvas({
             const curve = Math.min(100, Math.max(40, Math.hypot(dx, dy) * 0.25));
             const pathD = `M ${x1} ${y1} C ${x1 + curve} ${y1}, ${x2 - curve} ${y2}, ${x2} ${y2}`;
 
+            const srcCat = getNodeDominantCategory(src.files);
+            const srcCatStyle = getCategoryStyle(srcCat);
+            const tgtCat = getNodeDominantCategory(tgt.files);
+            const tgtCatStyle = getCategoryStyle(tgtCat);
+
+            let activeColor = srcCatStyle.hex;
+            let activeMarker = `url(#edge-arrow-${srcCat})`;
+
+            if (selectedNodeId === tgt.id) {
+              activeColor = tgtCatStyle.hex;
+              activeMarker = `url(#edge-arrow-${tgtCat})`;
+            } else if (selectedNodeId === src.id) {
+              activeColor = srcCatStyle.hex;
+              activeMarker = `url(#edge-arrow-${srcCat})`;
+            } else if (selectedCategoryId) {
+              const filterCatStyle = getCategoryStyle(selectedCategoryId);
+              activeColor = filterCatStyle.hex;
+              activeMarker = `url(#edge-arrow-${selectedCategoryId})`;
+            }
+
+            const restingStroke = srcCatStyle.hex + "55";
+
             return (
               <path
                 key={edge.id}
                 d={pathD}
                 fill="none"
-                stroke={isEdgeActive ? "#3b82f6" : "rgba(113, 113, 122, 0.45)"}
-                strokeWidth={isEdgeActive ? 2.5 : Math.min(2.5, Math.max(1.2, edge.count * 0.4))}
-                markerEnd={isEdgeActive ? "url(#edge-arrow-active)" : "url(#edge-arrow)"}
-                opacity={isEdgeDimmed ? 0.08 : 1}
+                stroke={isEdgeActive ? activeColor : restingStroke}
+                strokeWidth={isEdgeActive ? 2.5 : Math.min(2.2, Math.max(1.2, edge.count * 0.35))}
+                markerEnd={isEdgeActive ? activeMarker : "url(#edge-arrow)"}
+                opacity={isEdgeDimmed ? 0.06 : 1}
                 className="transition-all duration-75"
               />
             );
@@ -894,6 +945,8 @@ export function MapCanvas({
           const pos = getNodePos(node);
 
           const isNodeMovedToSide = isolatedSideNodeId === node.id;
+          const nodeCat = getNodeDominantCategory(node.files);
+          const nodeCatStyle = getCategoryStyle(nodeCat);
 
           return (
             <div
@@ -913,14 +966,18 @@ export function MapCanvas({
               }}
               className={`${
                 isBeingDragged
-                  ? "ring-2 ring-blue-500/80 shadow-2xl scale-[1.02] cursor-grabbing"
+                  ? `ring-2 ${nodeCatStyle.ringClass} shadow-2xl scale-[1.02] cursor-grabbing`
                   : ""
               }`}
             >
               {/* Floating action pill directly above selected node */}
               {isNodeSelected && !isOpen && (
                 <div
-                  className="absolute -top-9 left-1/2 -translate-x-1/2 z-50 flex items-center gap-1.5 bg-blue-600 hover:bg-blue-500 text-white shadow-xl shadow-blue-500/30 px-3 py-1 rounded-full text-xs font-semibold whitespace-nowrap cursor-pointer transition-all active:scale-95 border border-blue-400/50"
+                  style={{
+                    backgroundColor: nodeCatStyle.hex,
+                    boxShadow: `0 10px 25px -5px ${nodeCatStyle.glowHex}`,
+                  }}
+                  className="absolute -top-9 left-1/2 -translate-x-1/2 z-50 flex items-center gap-1.5 text-white px-3 py-1 rounded-full text-xs font-semibold whitespace-nowrap cursor-pointer transition-all active:scale-95 border border-white/20"
                   onMouseDown={(e) => e.stopPropagation()}
                   onClick={(e) => {
                     e.stopPropagation();
