@@ -287,6 +287,7 @@ export default function PreviewPage() {
           onSelectCycle={handleSelectCycle}
           hoveredNeighbourPath={hoveredNeighbourPath}
           onHoverPath={setHoveredNeighbourPath}
+          repositoryUrl={activeData.repositoryPath}
         />
       </div>
     </div>

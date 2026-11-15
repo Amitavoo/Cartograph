@@ -11,11 +11,18 @@
     "test:parser": "tsx tests/phase3-acceptance.ts",
     "test:folding": "tsx tests/phase4-acceptance.ts",
     "test:detail": "tsx tests/phase5-acceptance.ts",
-    "test:phase9": "tsx tests/phase9-acceptance.ts"
+    "test:phase9": "tsx tests/phase9-acceptance.ts",
+    "test:phase10": "tsx tests/phase10-acceptance.ts",
+    "test:phase11": "tsx tests/phase11-acceptance.ts",
+    "eval": "tsx src/evals/cli.ts",
+    "eval:history": "tsx src/evals/cli.ts history",
+    "eval:roles": "tsx src/evals/cli.ts roles",
+    "eval:prompts": "tsx src/evals/cli.ts prompts"
   },
   "dependencies": {
     "@clerk/nextjs": "^7.9.25",
     "@supabase/supabase-js": "^2.119.0",
+    "langsmith": "^0.12.0",
     "lucide-react": "^1.72.0",
     "next": "16.4.5",
     "pg": "^8.23.1",

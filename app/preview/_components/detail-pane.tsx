@@ -8,7 +8,7 @@ import {
   RepositorySummary,
   FileRelationshipIndex,
 } from "@/src/scaffolding/repository-analysis";
-import { TransitiveStep, RepositoryInsights } from "@/src/graph/traversal";
+import { TransitiveStep, RepositoryInsights, computeTransitiveWalk } from "@/src/graph/traversal";
 import {
   Folder,
   FileCode,
@@ -32,6 +32,17 @@ import {
   ChevronDown,
   ChevronRight,
   Repeat,
+  RefreshCw,
+  Copy,
+  Check,
+  ExternalLink,
+  ShieldCheck,
+  AlertCircle,
+  ArrowRight,
+  Clock,
+  Database,
+  Cpu,
+  Loader2,
 } from "lucide-react";
 
 interface DetailPaneProps {
@@ -58,6 +69,117 @@ interface DetailPaneProps {
   onSelectCycle?: (cyclePaths: string[]) => void;
   hoveredNeighbourPath: string | null;
   onHoverPath: (path: string | null) => void;
+  analysisId?: string;
+  repositoryUrl?: string;
+}
+
+function MarkdownExplanationView({
+  content,
+  onSelectPath,
+  allFilesMap,
+}: {
+  content: string;
+  onSelectPath: (path: string) => void;
+  allFilesMap: Map<string, ParsedFile>;
+}) {
+  const lines = content.split("\n");
+
+  return (
+    <div className="space-y-2 text-xs text-[var(--color-text)] leading-relaxed select-text">
+      {lines.map((line, idx) => {
+        let trimmed = line.trim();
+        if (!trimmed) return <div key={idx} className="h-1" />;
+
+        // Strictly strip any stray heading hashes (#, ##, ###)
+        if (trimmed.startsWith("#")) {
+          trimmed = trimmed.replace(/^#+\s*/, "");
+        }
+
+        const isBullet = trimmed.startsWith("- ") || trimmed.startsWith("* ");
+        const textToRender = isBullet ? trimmed.substring(2).trim() : trimmed;
+
+        // Parse inline code and bold segments
+        const tokens = textToRender.split(/(`[^`]+`|\*\*[^*]+\*\*)/g);
+
+        return (
+          <div
+            key={idx}
+            className={`${isBullet ? "flex items-start gap-2 pl-1" : ""}`}
+          >
+            {isBullet && (
+              <span className="w-1.5 h-1.5 rounded-full bg-blue-500 shrink-0 mt-1.5" />
+            )}
+            <p className="flex-1">
+              {tokens.map((token, tIdx) => {
+                if (!token) return null;
+
+                if (token.startsWith("`") && token.endsWith("`")) {
+                  const rawCode = token.slice(1, -1);
+                  const matchingFile = allFilesMap.get(rawCode);
+                  if (matchingFile) {
+                    return (
+                      <button
+                        key={tIdx}
+                        type="button"
+                        onClick={() => onSelectPath(matchingFile.path)}
+                        className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 border border-blue-500/30 font-mono text-[11px] transition-colors cursor-pointer"
+                        title={`Select ${matchingFile.path} on canvas`}
+                      >
+                        <span>{rawCode}</span>
+                        <ArrowUpRight className="w-2.5 h-2.5 opacity-70" />
+                      </button>
+                    );
+                  }
+                  return (
+                    <code
+                      key={tIdx}
+                      className="px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-200 font-mono text-[11px] border border-zinc-700/60"
+                    >
+                      {rawCode}
+                    </code>
+                  );
+                }
+
+                if (token.startsWith("**") && token.endsWith("**")) {
+                  return (
+                    <strong key={tIdx} className="font-semibold text-zinc-100">
+                      {token.slice(2, -2)}
+                    </strong>
+                  );
+                }
+
+                // In plain prose: detect any file paths matching repo files
+                const words = token.split(/(\s+)/);
+                return (
+                  <span key={tIdx}>
+                    {words.map((word, wIdx) => {
+                      const cleanWord = word.replace(/^[(`"']+|[)`"',.]+$/g, "");
+                      const matchingFile = allFilesMap.get(cleanWord);
+                      if (matchingFile) {
+                        return (
+                          <button
+                            key={wIdx}
+                            type="button"
+                            onClick={() => onSelectPath(matchingFile.path)}
+                            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 border border-blue-500/30 font-mono text-[11px] transition-colors cursor-pointer"
+                            title={`Select ${matchingFile.path} on canvas`}
+                          >
+                            <span>{cleanWord}</span>
+                            <ArrowUpRight className="w-2.5 h-2.5 opacity-70" />
+                          </button>
+                        );
+                      }
+                      return word;
+                    })}
+                  </span>
+                );
+              })}
+            </p>
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 export function DetailPane({
@@ -80,6 +202,8 @@ export function DetailPane({
   onSelectCycle,
   hoveredNeighbourPath,
   onHoverPath,
+  analysisId,
+  repositoryUrl,
 }: DetailPaneProps) {
   const hasSelection = Boolean(selectedNode || selectedFile);
 
@@ -146,6 +270,232 @@ export function DetailPane({
     return findings;
   }, [allFiles]);
 
+  // Explanation state
+  const [explanationState, setExplanationState] = useState<{
+    target: string;
+    summary: string;
+    cached: boolean;
+    isStale: boolean;
+    staleReason?: string;
+    referencedFiles: string[];
+    tracingActive: boolean;
+    loading: boolean;
+    error: string | null;
+    evaluation?: {
+      targetPath: string;
+      passed: boolean;
+      score: number;
+      groundingRate: number;
+      inventedPaths: string[];
+      kind: "deterministic";
+    };
+  } | null>(null);
+
+  // AI-classified roles for unclassified files
+  const [aiRoles, setAiRoles] = useState<Map<string, string>>(new Map());
+
+  const [copiedExplanation, setCopiedExplanation] = useState(false);
+  const cacheRef = React.useRef<
+    Map<
+      string,
+      {
+        summary: string;
+        cached: boolean;
+        isStale: boolean;
+        staleReason?: string;
+        referencedFiles: string[];
+        tracingActive: boolean;
+        evaluation?: {
+          targetPath: string;
+          passed: boolean;
+          score: number;
+          groundingRate: number;
+          inventedPaths: string[];
+          kind: "deterministic";
+        };
+      }
+    >
+  >(new Map());
+
+  const fetchExplanation = React.useCallback(
+    async (force = false) => {
+      const targetIdentifier = selectedFile
+        ? selectedFile.path
+        : selectedNode
+        ? selectedNode.fullPath || selectedNode.id
+        : null;
+
+      if (!targetIdentifier) return;
+
+      const cacheKey = `${analysisId || "preview"}:${targetIdentifier}`;
+      if (!force && cacheRef.current.has(cacheKey)) {
+        const cached = cacheRef.current.get(cacheKey)!;
+        setExplanationState({
+          target: targetIdentifier,
+          summary: cached.summary,
+          cached: cached.cached,
+          isStale: cached.isStale,
+          staleReason: cached.staleReason,
+          referencedFiles: cached.referencedFiles,
+          tracingActive: cached.tracingActive,
+          evaluation: cached.evaluation,
+          loading: false,
+          error: null,
+        });
+        return;
+      }
+
+      setExplanationState((prev) => ({
+        target: targetIdentifier,
+        summary: prev?.target === targetIdentifier ? prev.summary : "",
+        cached: false,
+        isStale: false,
+        referencedFiles: prev?.target === targetIdentifier ? prev.referencedFiles : [],
+        tracingActive: false,
+        loading: true,
+        error: null,
+      }));
+
+      try {
+        let payload: any = {
+          analysisId,
+          repositoryName: summary.name,
+          framework: summary.framework,
+          forceRegenerate: force,
+          allRepoFiles: allFiles.map((f) => f.path),
+        };
+
+        if (selectedFile) {
+          const incoming = relIndex.dependentsByFile.get(selectedFile.path) || [];
+          const outgoing = relIndex.importsByFile.get(selectedFile.path) || [];
+          const convention = classifyFileConvention(selectedFile.path);
+
+          payload = {
+            ...payload,
+            filePath: selectedFile.path,
+            contentHash: selectedFile.contentHash,
+            lines: selectedFile.lines,
+            category: convention.label,
+            fanIn: selectedFile.fanIn,
+            fanOut: selectedFile.fanOut,
+            incomingNeighbors: incoming,
+            outgoingNeighbors: outgoing,
+          };
+        } else if (selectedNode) {
+          const incomingNodes = edges.filter((e) => e.targetNodeId === selectedNode.id).map((e) => e.sourceNodeId);
+          const outgoingNodes = edges.filter((e) => e.sourceNodeId === selectedNode.id).map((e) => e.targetNodeId);
+
+          payload = {
+            ...payload,
+            modulePath: selectedNode.fullPath || selectedNode.id,
+            moduleLabel: selectedNode.label,
+            filesContained: selectedNode.files.map((f) => ({ name: f.name, path: f.path, lines: f.lines })),
+            lines: selectedNode.totalLines,
+            category: "Folded Module",
+            fanIn: selectedNode.fanIn,
+            fanOut: selectedNode.fanOut,
+            incomingNeighbors: incomingNodes,
+            outgoingNeighbors: outgoingNodes,
+          };
+        }
+
+        const res = await fetch("/api/explain", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+
+        if (!res.ok) {
+          throw new Error(`Failed to generate explanation (${res.status})`);
+        }
+
+        const data = await res.json();
+        if (data.success && data.summary) {
+          const record = {
+            summary: data.summary,
+            cached: Boolean(data.cached),
+            isStale: Boolean(data.isStale),
+            staleReason: data.staleReason,
+            referencedFiles: data.referencedFiles || [],
+            tracingActive: Boolean(data.tracingActive),
+            evaluation: data.evaluation,
+          };
+          cacheRef.current.set(cacheKey, record);
+          setExplanationState({
+            target: targetIdentifier,
+            summary: data.summary,
+            cached: Boolean(data.cached),
+            isStale: Boolean(data.isStale),
+            staleReason: data.staleReason,
+            referencedFiles: data.referencedFiles || [],
+            tracingActive: Boolean(data.tracingActive),
+            evaluation: data.evaluation,
+            loading: false,
+            error: null,
+          });
+        } else {
+          throw new Error(data.error || "Failed to parse explanation response");
+        }
+      } catch (err: any) {
+        setExplanationState((prev) => ({
+          target: targetIdentifier,
+          summary: prev?.summary || "",
+          cached: false,
+          isStale: false,
+          referencedFiles: prev?.referencedFiles || [],
+          tracingActive: false,
+          loading: false,
+          error: err.message || "Failed to load explanation",
+        }));
+      }
+    },
+    [analysisId, selectedFile, selectedNode, summary, relIndex, rawEdges, edges, allFiles]
+  );
+
+  // Auto-classify unclassified files
+  React.useEffect(() => {
+    if (!selectedFile) return;
+    const convention = classifyFileConvention(selectedFile.path);
+    if (convention.kind === "unclassified" && !aiRoles.has(selectedFile.path)) {
+      fetch("/api/explain", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "classify",
+          analysisId,
+          filePath: selectedFile.path,
+          lines: selectedFile.lines,
+          incomingNeighbors: relIndex.dependentsByFile.get(selectedFile.path) || [],
+          outgoingNeighbors: relIndex.importsByFile.get(selectedFile.path) || [],
+        }),
+      })
+        .then((r) => r.json())
+        .then((data) => {
+          if (data.success && data.role) {
+            setAiRoles((prev) => new Map(prev).set(selectedFile.path, data.role));
+          }
+        })
+        .catch(() => {});
+    }
+  }, [selectedFile, analysisId, relIndex, aiRoles]);
+
+  React.useEffect(() => {
+    if (activeTab === "explanation" && (selectedFile || selectedNode)) {
+      const targetIdentifier = selectedFile ? selectedFile.path : selectedNode ? selectedNode.fullPath || selectedNode.id : null;
+      if (targetIdentifier && explanationState?.target !== targetIdentifier) {
+        fetchExplanation(false);
+      }
+    }
+  }, [activeTab, selectedFile, selectedNode, explanationState?.target, fetchExplanation]);
+
+  const handleCopyExplanation = () => {
+    if (explanationState?.summary) {
+      navigator.clipboard.writeText(explanationState.summary);
+      setCopiedExplanation(true);
+      setTimeout(() => setCopiedExplanation(false), 2000);
+    }
+  };
+
   return (
     <aside className="w-80 md:w-96 border-l border-[var(--color-border)] bg-[var(--color-surface)] flex flex-col shrink-0 h-full overflow-hidden select-none">
       {/* 1. Permanent Tab Header (Survives selection changes) */}
@@ -192,32 +542,490 @@ export function DetailPane({
       <div className="flex-1 overflow-y-auto">
         {activeTab === "explanation" ? (
           /* ========================================================= */
-          /* EXPLANATION TAB: Model Call Empty State                   */
+          /* EXPLANATION TAB: Gemini 2.5 Flash Grounded Architectural   */
           /* ========================================================= */
-          <div className="p-6 flex flex-col items-center justify-center text-center h-full space-y-4">
-            <div className="w-12 h-12 rounded-2xl bg-blue-500/10 border border-blue-500/20 text-blue-400 flex items-center justify-center shadow-inner">
-              <Sparkles className="w-6 h-6 animate-pulse" />
-            </div>
-            <div>
-              <h3 className="text-xs font-semibold text-[var(--color-text)]">
-                AI Explanation Engine
-              </h3>
-              <p className="text-xs text-[var(--color-text-muted)] mt-1.5 max-w-xs leading-relaxed">
-                {selectedFile
-                  ? `Structural summary ready for "${selectedFile.name}". AI explanation is pending an analysis model call.`
-                  : selectedNode
-                  ? `Module analysis ready for "${selectedNode.label}". AI architectural breakdown will populate here once analyzed.`
-                  : "Select a file or module on the map to generate architectural explanations and walkthroughs."}
-              </p>
-            </div>
-            <div className="p-3 w-full rounded-lg bg-[var(--color-surface-sunken)]/60 border border-[var(--color-border)] text-left text-[11px] text-[var(--color-text-muted)] space-y-1">
-              <div className="font-medium text-[var(--color-text)] flex items-center gap-1">
-                <HelpCircle className="w-3.5 h-3.5 text-blue-500" />
-                <span>Phase 5 Status</span>
+          !hasSelection ? (
+            <div className="p-4 space-y-4">
+              {/* Repo Explanation Overview Card */}
+              <div className="p-4 rounded-xl bg-[var(--color-surface-sunken)] border border-[var(--color-border)] space-y-3">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-lg bg-blue-500/10 border border-blue-500/20 text-blue-400 flex items-center justify-center">
+                    <Sparkles className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="text-xs font-bold text-[var(--color-text)]">
+                      Architectural Intelligence
+                    </h3>
+                    <p className="text-[10px] text-[var(--color-text-muted)] font-mono">
+                      Gemini 2.5 Flash · AST Grounded
+                    </p>
+                  </div>
+                </div>
+                <p className="text-xs text-[var(--color-text-muted)] leading-relaxed">
+                  Select any file or module on the map to inspect its real architectural responsibilities, dependency flow, and impact analysis based strictly on the parsed AST graph with zero hallucinations.
+                </p>
               </div>
-              <p>Tab selection is preserved across file and module navigations.</p>
+
+              {/* Quick exploration suggestions */}
+              <div className="space-y-2">
+                <div className="text-[10px] font-mono uppercase tracking-wider text-[var(--color-text-muted)] px-1">
+                  Recommended Starting Points
+                </div>
+
+                {summary.mostDependedFiles.length > 0 && (() => {
+                  const hub = summary.mostDependedFiles[0];
+                  const hubFile = hub.file;
+                  return (
+                    <button
+                      type="button"
+                      onClick={() => hubFile && onSelectFile(hubFile)}
+                      className="w-full p-2.5 rounded-lg bg-[var(--color-surface-sunken)] hover:bg-[var(--color-surface-raised)] border border-[var(--color-border)] hover:border-blue-500/40 text-left transition-all group flex items-center justify-between"
+                    >
+                      <div className="min-w-0 pr-2">
+                        <div className="flex items-center gap-1.5 text-xs font-semibold text-[var(--color-text)]">
+                          <Compass className="w-3.5 h-3.5 text-blue-500 shrink-0" />
+                          <span className="truncate">{hub.file.name}</span>
+                        </div>
+                        <div className="text-[10px] text-[var(--color-text-muted)] font-mono truncate mt-0.5">
+                          Core Dependency Hub · {hub.count} consumers
+                        </div>
+                      </div>
+                      <ArrowRight className="w-3.5 h-3.5 text-[var(--color-text-muted)] group-hover:text-blue-400 shrink-0 transition-transform group-hover:translate-x-0.5" />
+                    </button>
+                  );
+                })()}
+
+                {summary.startingFiles.length > 0 && (() => {
+                  const leaf = summary.startingFiles[0];
+                  const leafFile = leaf.file;
+                  return (
+                    <button
+                      type="button"
+                      onClick={() => leafFile && onSelectFile(leafFile)}
+                      className="w-full p-2.5 rounded-lg bg-[var(--color-surface-sunken)] hover:bg-[var(--color-surface-raised)] border border-[var(--color-border)] hover:border-emerald-500/40 text-left transition-all group flex items-center justify-between"
+                    >
+                      <div className="min-w-0 pr-2">
+                        <div className="flex items-center gap-1.5 text-xs font-semibold text-[var(--color-text)]">
+                          <PlayCircle className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                          <span className="truncate">{leaf.file.name}</span>
+                        </div>
+                        <div className="text-[10px] text-[var(--color-text-muted)] font-mono truncate mt-0.5">
+                          Entry Point · 0 internal consumers
+                        </div>
+                      </div>
+                      <ArrowRight className="w-3.5 h-3.5 text-[var(--color-text-muted)] group-hover:text-emerald-400 shrink-0 transition-transform group-hover:translate-x-0.5" />
+                    </button>
+                  );
+                })()}
+              </div>
             </div>
-          </div>
+          ) : selectedFile ? (
+            (() => {
+              const classification = classifyFileConvention(selectedFile.path);
+              const importedPaths = relIndex.importsByFile.get(selectedFile.path) || [];
+              const dependentPaths = relIndex.dependentsByFile.get(selectedFile.path) || [];
+              const blastSteps = computeTransitiveWalk(selectedFile.path, rawEdges as any, "upstream", 2);
+
+              return (
+                <div className="p-4 space-y-4">
+                  {/* Target File Header */}
+                  <div className="p-3 rounded-xl bg-[var(--color-surface-sunken)] border border-[var(--color-border)] space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className={`text-[10px] font-mono px-2 py-0.5 rounded border font-medium ${classification.color}`}>
+                          {classification.label}
+                        </span>
+                        {aiRoles.has(selectedFile.path) && (
+                          <span className="text-[10px] font-mono px-2 py-0.5 rounded border border-purple-500/30 bg-purple-500/10 text-purple-300 font-medium">
+                            Role: {aiRoles.get(selectedFile.path)}
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1">
+                        {explanationState?.tracingActive ? (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" title="Traced to LangSmith">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                            <span>Traced</span>
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 border border-zinc-700" title="LangSmith tracing unconfigured">
+                            <span className="w-1.5 h-1.5 rounded-full bg-zinc-500" />
+                            <span>Tracing unconfigured</span>
+                          </span>
+                        )}
+
+                        {explanationState?.cached ? (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                            <Database className="w-2.5 h-2.5" />
+                            <span>Cached</span>
+                          </span>
+                        ) : explanationState?.loading ? (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20 animate-pulse">
+                            <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                            <span>Analyzing</span>
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                            <Sparkles className="w-2.5 h-2.5" />
+                            <span>Gemini 2.5</span>
+                          </span>
+                        )}
+
+                        {explanationState?.evaluation && (
+                          explanationState.evaluation.passed ? (
+                            <span
+                              className="inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                              title={`Deterministic Quality Metric: 0 invented paths (${explanationState.evaluation.groundingRate}% grounded). Verified by deterministic set membership.`}
+                            >
+                              <ShieldCheck className="w-2.5 h-2.5" />
+                              <span>{explanationState.evaluation.groundingRate}% Grounded</span>
+                            </span>
+                          ) : (
+                            <span
+                              className="inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded bg-rose-500/10 text-rose-400 border border-rose-500/20"
+                              title={`Deterministic Quality Metric: ${explanationState.evaluation.inventedPaths.length} invented path(s) flagged: ${explanationState.evaluation.inventedPaths.join(", ")}`}
+                            >
+                              <AlertCircle className="w-2.5 h-2.5" />
+                              <span>{explanationState.evaluation.inventedPaths.length} Invented</span>
+                            </span>
+                          )
+                        )}
+
+                        <button
+                          type="button"
+                          onClick={() => fetchExplanation(true)}
+                          disabled={explanationState?.loading}
+                          className="p-1 rounded text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface)] disabled:opacity-40 transition-colors"
+                          title="Regenerate explanation"
+                        >
+                          <RefreshCw className={`w-3.5 h-3.5 ${explanationState?.loading ? "animate-spin" : ""}`} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleCopyExplanation}
+                          disabled={!explanationState?.summary}
+                          className="p-1 rounded text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface)] disabled:opacity-40 transition-colors"
+                          title="Copy explanation"
+                        >
+                          {copiedExplanation ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                        </button>
+                      </div>
+                    </div>
+
+                    <h3 className="text-sm font-bold text-[var(--color-text)] font-mono break-all select-text">
+                      {selectedFile.name}
+                    </h3>
+                    <div className="text-[11px] font-mono text-[var(--color-text-muted)] break-all select-text">
+                      {selectedFile.path}
+                    </div>
+                  </div>
+
+                  {/* Staleness Banner */}
+                  {explanationState?.isStale && (
+                    <div className="p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-300 text-xs flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
+                        <span className="truncate">Explanation is stale ({explanationState.staleReason || "file changed"}).</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => fetchExplanation(true)}
+                        className="px-2 py-0.5 rounded bg-amber-500/20 hover:bg-amber-500/30 text-[11px] font-semibold transition-colors shrink-0"
+                      >
+                        Re-analyse
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Loading Skeleton */}
+                  {explanationState?.loading && (
+                    <div className="p-4 rounded-xl bg-[var(--color-surface-sunken)]/60 border border-[var(--color-border)] space-y-3 animate-pulse">
+                      <div className="h-3 w-1/3 bg-blue-500/20 rounded" />
+                      <div className="h-2 w-full bg-[var(--color-border)] rounded" />
+                      <div className="h-2 w-5/6 bg-[var(--color-border)] rounded" />
+                      <div className="h-2 w-4/6 bg-[var(--color-border)] rounded" />
+                      <div className="pt-2">
+                        <div className="h-3 w-1/2 bg-blue-500/20 rounded mb-2" />
+                        <div className="h-2 w-full bg-[var(--color-border)] rounded" />
+                        <div className="h-2 w-3/4 bg-[var(--color-border)] rounded" />
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Error state */}
+                  {!explanationState?.loading && explanationState?.error && (
+                    <div className="p-3 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs space-y-2">
+                      <div className="flex items-center gap-1.5 font-semibold">
+                        <AlertCircle className="w-4 h-4" />
+                        <span>Explanation generation failed</span>
+                      </div>
+                      <p className="text-[11px]">{explanationState.error}</p>
+                      <button
+                        type="button"
+                        onClick={() => fetchExplanation(true)}
+                        className="px-2 py-1 rounded bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 font-semibold text-[11px] transition-colors"
+                      >
+                        Retry
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Rendered Explanation */}
+                  {!explanationState?.loading && explanationState?.summary && (
+                    <div className="p-3.5 rounded-xl bg-[var(--color-surface-sunken)] border border-[var(--color-border)] space-y-3">
+                      <MarkdownExplanationView
+                        content={explanationState.summary}
+                        onSelectPath={(p) => {
+                          const f = fileLookup.get(p);
+                          if (f) onSelectFile(f);
+                        }}
+                        allFilesMap={fileLookup}
+                      />
+                    </div>
+                  )}
+
+                  {/* Connected Real Neighbours (Inbound & Outbound) */}
+                  <div className="space-y-3 pt-1 border-t border-[var(--color-border)]">
+                    {/* Inbound consumers */}
+                    <div>
+                      <div className="flex items-center justify-between text-[11px] font-medium text-[var(--color-text-muted)] mb-1.5">
+                        <span className="flex items-center gap-1 text-blue-400">
+                          <ArrowDownRight className="w-3.5 h-3.5" />
+                          <span>Inbound Consumers ({dependentPaths.length})</span>
+                        </span>
+                      </div>
+                      {dependentPaths.length === 0 ? (
+                        <div className="text-[11px] text-[var(--color-text-muted)] italic">
+                          No files import this directly
+                        </div>
+                      ) : (
+                        <div className="flex flex-wrap gap-1">
+                          {dependentPaths.slice(0, 8).map((p) => {
+                            const target = fileLookup.get(p);
+                            return (
+                              <button
+                                key={p}
+                                type="button"
+                                onClick={() => target && onSelectFile(target)}
+                                onMouseEnter={() => onHoverPath(p)}
+                                onMouseLeave={() => onHoverPath(null)}
+                                className="px-2 py-1 rounded bg-[var(--color-surface-sunken)] hover:bg-blue-500/15 border border-[var(--color-border)] hover:border-blue-500/40 text-[11px] font-mono text-[var(--color-text)] transition-colors truncate max-w-[200px]"
+                                title={`Focus ${p}`}
+                              >
+                                {p.split("/").pop()}
+                              </button>
+                            );
+                          })}
+                          {dependentPaths.length > 8 && (
+                            <span className="px-1.5 py-1 text-[10px] font-mono text-[var(--color-text-muted)] self-center">
+                              +{dependentPaths.length - 8} more
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Outbound dependencies */}
+                    <div>
+                      <div className="flex items-center justify-between text-[11px] font-medium text-[var(--color-text-muted)] mb-1.5">
+                        <span className="flex items-center gap-1 text-[var(--color-text-muted)]">
+                          <ArrowUpRight className="w-3.5 h-3.5" />
+                          <span>Outbound Dependencies ({importedPaths.length})</span>
+                        </span>
+                      </div>
+                      {importedPaths.length === 0 ? (
+                        <div className="text-[11px] text-[var(--color-text-muted)] italic">
+                          No internal dependencies imported
+                        </div>
+                      ) : (
+                        <div className="flex flex-wrap gap-1">
+                          {importedPaths.slice(0, 8).map((p) => {
+                            const target = fileLookup.get(p);
+                            return (
+                              <button
+                                key={p}
+                                type="button"
+                                onClick={() => target && onSelectFile(target)}
+                                onMouseEnter={() => onHoverPath(p)}
+                                onMouseLeave={() => onHoverPath(null)}
+                                className="px-2 py-1 rounded bg-[var(--color-surface-sunken)] hover:bg-[var(--color-surface-raised)] border border-[var(--color-border)] hover:border-zinc-500 text-[11px] font-mono text-[var(--color-text)] transition-colors truncate max-w-[200px]"
+                                title={`Focus ${p}`}
+                              >
+                                {p.split("/").pop()}
+                              </button>
+                            );
+                          })}
+                          {importedPaths.length > 8 && (
+                            <span className="px-1.5 py-1 text-[10px] font-mono text-[var(--color-text-muted)] self-center">
+                              +{importedPaths.length - 8} more
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Blast Radius canvas action */}
+                    <button
+                      type="button"
+                      onClick={() => onStartTraversal("blast", selectedFile)}
+                      className="w-full py-2 px-3 rounded-lg border border-rose-500/30 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors shadow-sm"
+                    >
+                      <Zap className="w-3.5 h-3.5 text-rose-500" />
+                      <span>Inspect Blast Radius on Canvas ({blastSteps.length} files)</span>
+                    </button>
+                  </div>
+                </div>
+              );
+            })()
+          ) : (
+            (() => {
+              return (
+                <div className="p-4 space-y-4">
+                  {/* Module Header */}
+                  <div className="p-3 rounded-xl bg-[var(--color-surface-sunken)] border border-[var(--color-border)] space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded border border-blue-500/20 bg-blue-500/10 text-blue-400 font-medium">
+                        Folded Module
+                      </span>
+                      <div className="flex items-center gap-1">
+                        {explanationState?.tracingActive ? (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" title="Traced to LangSmith">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                            <span>Traced</span>
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 border border-zinc-700" title="LangSmith tracing unconfigured">
+                            <span className="w-1.5 h-1.5 rounded-full bg-zinc-500" />
+                            <span>Tracing unconfigured</span>
+                          </span>
+                        )}
+
+                        {explanationState?.cached ? (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                            <Database className="w-2.5 h-2.5" />
+                            <span>Cached</span>
+                          </span>
+                        ) : explanationState?.loading ? (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20 animate-pulse">
+                            <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                            <span>Analyzing</span>
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                            <Sparkles className="w-2.5 h-2.5" />
+                            <span>Gemini 2.5</span>
+                          </span>
+                        )}
+
+                        {explanationState?.evaluation && (
+                          explanationState.evaluation.passed ? (
+                            <span
+                              className="inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                              title={`Deterministic Quality Metric: 0 invented paths (${explanationState.evaluation.groundingRate}% grounded). Verified by deterministic set membership.`}
+                            >
+                              <ShieldCheck className="w-2.5 h-2.5" />
+                              <span>{explanationState.evaluation.groundingRate}% Grounded</span>
+                            </span>
+                          ) : (
+                            <span
+                              className="inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded bg-rose-500/10 text-rose-400 border border-rose-500/20"
+                              title={`Deterministic Quality Metric: ${explanationState.evaluation.inventedPaths.length} invented path(s) flagged: ${explanationState.evaluation.inventedPaths.join(", ")}`}
+                            >
+                              <AlertCircle className="w-2.5 h-2.5" />
+                              <span>{explanationState.evaluation.inventedPaths.length} Invented</span>
+                            </span>
+                          )
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => fetchExplanation(true)}
+                          disabled={explanationState?.loading}
+                          className="p-1 rounded text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface)] disabled:opacity-40 transition-colors"
+                          title="Regenerate explanation"
+                        >
+                          <RefreshCw className={`w-3.5 h-3.5 ${explanationState?.loading ? "animate-spin" : ""}`} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleCopyExplanation}
+                          disabled={!explanationState?.summary}
+                          className="p-1 rounded text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface)] disabled:opacity-40 transition-colors"
+                          title="Copy explanation"
+                        >
+                          {copiedExplanation ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <Folder className="w-4 h-4 text-blue-500" />
+                      <h3 className="text-sm font-bold text-[var(--color-text)] font-mono break-all select-text">
+                        {selectedNode.label}
+                      </h3>
+                    </div>
+                    <div className="text-[11px] font-mono text-[var(--color-text-muted)] break-all select-text">
+                      {selectedNode.fullPath || selectedNode.id}
+                    </div>
+                    <div className="text-[10px] font-mono text-[var(--color-text-muted)]">
+                      {selectedNode.fileCount} files · {selectedNode.totalLines} lines
+                    </div>
+                  </div>
+
+                  {/* Loading Skeleton */}
+                  {explanationState?.loading && (
+                    <div className="p-4 rounded-xl bg-[var(--color-surface-sunken)]/60 border border-[var(--color-border)] space-y-3 animate-pulse">
+                      <div className="h-3 w-1/3 bg-blue-500/20 rounded" />
+                      <div className="h-2 w-full bg-[var(--color-border)] rounded" />
+                      <div className="h-2 w-5/6 bg-[var(--color-border)] rounded" />
+                    </div>
+                  )}
+
+                  {/* Rendered Explanation */}
+                  {!explanationState?.loading && explanationState?.summary && (
+                    <div className="p-3.5 rounded-xl bg-[var(--color-surface-sunken)] border border-[var(--color-border)] space-y-3">
+                      <MarkdownExplanationView
+                        content={explanationState.summary}
+                        onSelectPath={(p) => {
+                          const f = fileLookup.get(p);
+                          if (f) onSelectFile(f);
+                        }}
+                        allFilesMap={fileLookup}
+                      />
+                    </div>
+                  )}
+
+                  {/* Contained Files */}
+                  <div className="space-y-2 pt-1 border-t border-[var(--color-border)]">
+                    <div className="text-[11px] font-medium text-[var(--color-text-muted)] flex items-center justify-between">
+                      <span>Files in this Module ({selectedNode.files.length})</span>
+                    </div>
+                    <div className="space-y-1 max-h-48 overflow-y-auto pr-1">
+                      {selectedNode.files.map((f) => (
+                        <button
+                          key={f.path}
+                          type="button"
+                          onClick={() => onSelectFile(f)}
+                          className="w-full p-2 rounded-md bg-[var(--color-surface-sunken)] hover:bg-blue-500/10 border border-[var(--color-border)] hover:border-blue-500/30 text-left transition-colors flex items-center justify-between group"
+                        >
+                          <div className="min-w-0 pr-2">
+                            <div className="text-xs font-mono text-[var(--color-text)] truncate group-hover:text-blue-400">
+                              {f.name}
+                            </div>
+                            <div className="text-[10px] font-mono text-[var(--color-text-muted)] truncate">
+                              {f.path}
+                            </div>
+                          </div>
+                          <span className="text-[10px] font-mono text-[var(--color-text-muted)] shrink-0">
+                            {f.lines}L
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              );
+            })()
+          )
         ) : !hasSelection ? (
           /* ========================================================= */
           /* STRUCTURE TAB - STATE A: Repository Summary (Resting)    */
