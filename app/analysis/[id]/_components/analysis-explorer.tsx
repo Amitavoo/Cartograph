@@ -101,8 +101,8 @@ export function AnalysisExplorer({
     [activeData.files, activeData.edges]
   );
 
-  // Structure vs Explanation tab
-  const [activeTab, setActiveTab] = useState<"structure" | "explanation">("structure");
+  // Structure vs Explanation vs Ask tab
+  const [activeTab, setActiveTab] = useState<"structure" | "explanation" | "ask">("structure");
 
   // Bi-directional hover highlighting
   const [hoveredNeighbourPath, setHoveredNeighbourPath] = useState<string | null>(null);

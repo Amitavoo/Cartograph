@@ -76,8 +76,8 @@ export default function PreviewPage() {
     [activeData.files, activeData.edges]
   );
 
-  // Phase 5 Tabs: "structure" | "explanation" (Preserved across file/module selections)
-  const [activeTab, setActiveTab] = useState<"structure" | "explanation">("structure");
+  // Tabs: "structure" | "explanation" | "ask" (Preserved across file/module selections)
+  const [activeTab, setActiveTab] = useState<"structure" | "explanation" | "ask">("structure");
 
   // Bi-directional hover highlighting
   const [hoveredNeighbourPath, setHoveredNeighbourPath] = useState<string | null>(null);

@@ -14,6 +14,7 @@
     "test:phase9": "tsx tests/phase9-acceptance.ts",
     "test:phase10": "tsx tests/phase10-acceptance.ts",
     "test:phase11": "tsx tests/phase11-acceptance.ts",
+    "test:phase12": "tsx tests/phase12-acceptance.ts",
     "eval": "tsx src/evals/cli.ts",
     "eval:history": "tsx src/evals/cli.ts history",
     "eval:roles": "tsx src/evals/cli.ts roles",
