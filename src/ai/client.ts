@@ -1,6 +1,9 @@
 import { RunTree, Client } from "langsmith";
 import { query } from "@/src/pipeline/database";
 import crypto from "crypto";
+import { evaluateInventedPaths } from "../evals/invented-paths";
+import { submitInventedPathFeedback, recordEvaluationInDb } from "../evals/feedback";
+import { InventedPathResult } from "../evals/types";
 
 export const PINNED_MODEL = "gemini-2.5-flash-202502";
 export const MODEL_API_NAME = "gemini-2.5-flash";
@@ -74,6 +77,8 @@ export interface ExplanationResult {
   referencedFiles: string[];
   tracingActive: boolean;
   model: string;
+  evaluation?: InventedPathResult;
+  traceId?: string;
 }
 
 /**
@@ -164,13 +169,32 @@ export async function explainFile(params: ExplainFileParams): Promise<Explanatio
             const cachedRow = expRes.rows[0];
             const isStale = Boolean(cachedRow.hash && cachedRow.hash !== compositeHash);
 
+            const suppliedContextPaths = [
+              params.filePath,
+              ...params.outgoingNeighbors,
+              ...params.incomingNeighbors,
+            ];
+            const evaluation = evaluateInventedPaths(params.filePath, cachedRow.summary, suppliedContextPaths);
+
             // Record cache hit in LangSmith with ZERO tokens
             if (parentRun) {
               parentRun.end({
-                outputs: { summary: cachedRow.summary, cached: true, isStale },
+                outputs: { summary: cachedRow.summary, cached: true, isStale, evaluation },
                 usage_metadata: { input_tokens: 0, output_tokens: 0, total_tokens: 0 },
               });
               await parentRun.postRun().catch(() => {});
+              await submitInventedPathFeedback(parentRun.id, evaluation).catch(() => {});
+            }
+
+            if (params.analysisId) {
+              await recordEvaluationInDb({
+                organizationId: params.organizationId,
+                analysisId: params.analysisId,
+                targetPath: params.filePath,
+                promptVersion: "v1.2.0-current",
+                result: evaluation,
+                langsmithTraceId: parentRun?.id,
+              }).catch(() => {});
             }
 
             const referencedFiles = extractReferencedFiles(cachedRow.summary, params.allRepoFiles);
@@ -182,6 +206,8 @@ export async function explainFile(params: ExplainFileParams): Promise<Explanatio
               referencedFiles,
               tracingActive: Boolean(client),
               model: PINNED_MODEL,
+              evaluation,
+              traceId: parentRun?.id,
             };
           }
         }
@@ -281,9 +307,16 @@ FORMATTING CONSTRAINTS (STRICT):
       }
     }
 
+    const suppliedContextPaths = [
+      params.filePath,
+      ...params.outgoingNeighbors,
+      ...params.incomingNeighbors,
+    ];
+    const evaluation = evaluateInventedPaths(params.filePath, summaryText, suppliedContextPaths);
+
     if (parentRun) {
       parentRun.end({
-        outputs: { summary: summaryText, cached: false },
+        outputs: { summary: summaryText, cached: false, evaluation },
         usage_metadata: {
           input_tokens: inTokens,
           output_tokens: outTokens,
@@ -291,6 +324,18 @@ FORMATTING CONSTRAINTS (STRICT):
         },
       });
       await parentRun.postRun().catch(() => {});
+      await submitInventedPathFeedback(parentRun.id, evaluation).catch(() => {});
+    }
+
+    if (params.analysisId) {
+      await recordEvaluationInDb({
+        organizationId: params.organizationId,
+        analysisId: params.analysisId,
+        targetPath: params.filePath,
+        promptVersion: "v1.2.0-current",
+        result: evaluation,
+        langsmithTraceId: parentRun?.id,
+      }).catch(() => {});
     }
 
     const referencedFiles = extractReferencedFiles(summaryText, params.allRepoFiles);
@@ -301,6 +346,8 @@ FORMATTING CONSTRAINTS (STRICT):
       referencedFiles,
       tracingActive: Boolean(client),
       model: PINNED_MODEL,
+      evaluation,
+      traceId: parentRun?.id,
     };
   } catch (err: any) {
     if (parentRun) {
@@ -310,6 +357,12 @@ FORMATTING CONSTRAINTS (STRICT):
 
     // Fallback deterministic synthesis
     const fallback = generateFileFallback(params);
+    const evaluation = evaluateInventedPaths(
+      params.filePath,
+      fallback,
+      [params.filePath, ...params.outgoingNeighbors, ...params.incomingNeighbors]
+    );
+
     return {
       summary: fallback,
       cached: false,
@@ -317,6 +370,8 @@ FORMATTING CONSTRAINTS (STRICT):
       referencedFiles: extractReferencedFiles(fallback, params.allRepoFiles),
       tracingActive: Boolean(client),
       model: PINNED_MODEL,
+      evaluation,
+      traceId: parentRun?.id,
     };
   }
 }
@@ -408,9 +463,17 @@ FORMATTING CONSTRAINTS (STRICT):
 
     summaryText = cleanStrayHeadings(summaryText);
 
+    const suppliedContextPaths = [
+      params.folderPath,
+      ...params.filesContained.map((f) => f.path),
+      ...params.incomingNodes,
+      ...params.outgoingNodes,
+    ];
+    const evaluation = evaluateInventedPaths(params.folderPath, summaryText, suppliedContextPaths);
+
     if (parentRun) {
       parentRun.end({
-        outputs: { summary: summaryText, cached: false },
+        outputs: { summary: summaryText, cached: false, evaluation },
         usage_metadata: {
           input_tokens: inTokens,
           output_tokens: outTokens,
@@ -418,6 +481,7 @@ FORMATTING CONSTRAINTS (STRICT):
         },
       });
       await parentRun.postRun().catch(() => {});
+      await submitInventedPathFeedback(parentRun.id, evaluation).catch(() => {});
     }
 
     const referencedFiles = extractReferencedFiles(summaryText, params.allRepoFiles);
@@ -428,6 +492,8 @@ FORMATTING CONSTRAINTS (STRICT):
       referencedFiles,
       tracingActive: Boolean(client),
       model: PINNED_MODEL,
+      evaluation,
+      traceId: parentRun?.id,
     };
   } catch (err: any) {
     if (parentRun) {
@@ -436,6 +502,12 @@ FORMATTING CONSTRAINTS (STRICT):
     }
 
     const fallback = `The **${params.folderLabel}** module comprises ${params.filesContained.length} files (${params.totalLines} lines). It functions as a cohesive subsystem relied upon by **${params.incomingNodes.length}** external module connections while consuming **${params.outgoingNodes.length}** external dependencies.`;
+    const evaluation = evaluateInventedPaths(
+      params.folderPath,
+      fallback,
+      [params.folderPath, ...params.filesContained.map((f) => f.path), ...params.incomingNodes, ...params.outgoingNodes]
+    );
+
     return {
       summary: fallback,
       cached: false,
@@ -443,6 +515,8 @@ FORMATTING CONSTRAINTS (STRICT):
       referencedFiles: extractReferencedFiles(fallback, params.allRepoFiles),
       tracingActive: Boolean(client),
       model: PINNED_MODEL,
+      evaluation,
+      traceId: parentRun?.id,
     };
   }
 }
@@ -512,7 +586,7 @@ Output ONLY the single chosen word in lowercase.`;
     else if (lower.includes("component") || lower.endsWith(".tsx")) chosenRole = "component";
     else if (lower.includes("config")) chosenRole = "config";
     else if (lower.includes("service")) chosenRole = "service";
-    else if (lower.includes("model")) chosenRole = "model";
+    else if (lower.includes("model") || lower.includes("entity") || lower.includes("schema")) chosenRole = "model";
     else if (lower.includes("repo")) chosenRole = "repository";
   }
 

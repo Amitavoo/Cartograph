@@ -281,6 +281,14 @@ export function DetailPane({
     tracingActive: boolean;
     loading: boolean;
     error: string | null;
+    evaluation?: {
+      targetPath: string;
+      passed: boolean;
+      score: number;
+      groundingRate: number;
+      inventedPaths: string[];
+      kind: "deterministic";
+    };
   } | null>(null);
 
   // AI-classified roles for unclassified files
@@ -297,6 +305,14 @@ export function DetailPane({
         staleReason?: string;
         referencedFiles: string[];
         tracingActive: boolean;
+        evaluation?: {
+          targetPath: string;
+          passed: boolean;
+          score: number;
+          groundingRate: number;
+          inventedPaths: string[];
+          kind: "deterministic";
+        };
       }
     >
   >(new Map());
@@ -322,6 +338,7 @@ export function DetailPane({
           staleReason: cached.staleReason,
           referencedFiles: cached.referencedFiles,
           tracingActive: cached.tracingActive,
+          evaluation: cached.evaluation,
           loading: false,
           error: null,
         });
@@ -401,6 +418,7 @@ export function DetailPane({
             staleReason: data.staleReason,
             referencedFiles: data.referencedFiles || [],
             tracingActive: Boolean(data.tracingActive),
+            evaluation: data.evaluation,
           };
           cacheRef.current.set(cacheKey, record);
           setExplanationState({
@@ -411,6 +429,7 @@ export function DetailPane({
             staleReason: data.staleReason,
             referencedFiles: data.referencedFiles || [],
             tracingActive: Boolean(data.tracingActive),
+            evaluation: data.evaluation,
             loading: false,
             error: null,
           });
@@ -652,6 +671,26 @@ export function DetailPane({
                           </span>
                         )}
 
+                        {explanationState?.evaluation && (
+                          explanationState.evaluation.passed ? (
+                            <span
+                              className="inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                              title={`Deterministic Quality Metric: 0 invented paths (${explanationState.evaluation.groundingRate}% grounded). Verified by deterministic set membership.`}
+                            >
+                              <ShieldCheck className="w-2.5 h-2.5" />
+                              <span>{explanationState.evaluation.groundingRate}% Grounded</span>
+                            </span>
+                          ) : (
+                            <span
+                              className="inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded bg-rose-500/10 text-rose-400 border border-rose-500/20"
+                              title={`Deterministic Quality Metric: ${explanationState.evaluation.inventedPaths.length} invented path(s) flagged: ${explanationState.evaluation.inventedPaths.join(", ")}`}
+                            >
+                              <AlertCircle className="w-2.5 h-2.5" />
+                              <span>{explanationState.evaluation.inventedPaths.length} Invented</span>
+                            </span>
+                          )
+                        )}
+
                         <button
                           type="button"
                           onClick={() => fetchExplanation(true)}
@@ -876,6 +915,26 @@ export function DetailPane({
                             <Sparkles className="w-2.5 h-2.5" />
                             <span>Gemini 2.5</span>
                           </span>
+                        )}
+
+                        {explanationState?.evaluation && (
+                          explanationState.evaluation.passed ? (
+                            <span
+                              className="inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                              title={`Deterministic Quality Metric: 0 invented paths (${explanationState.evaluation.groundingRate}% grounded). Verified by deterministic set membership.`}
+                            >
+                              <ShieldCheck className="w-2.5 h-2.5" />
+                              <span>{explanationState.evaluation.groundingRate}% Grounded</span>
+                            </span>
+                          ) : (
+                            <span
+                              className="inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded bg-rose-500/10 text-rose-400 border border-rose-500/20"
+                              title={`Deterministic Quality Metric: ${explanationState.evaluation.inventedPaths.length} invented path(s) flagged: ${explanationState.evaluation.inventedPaths.join(", ")}`}
+                            >
+                              <AlertCircle className="w-2.5 h-2.5" />
+                              <span>{explanationState.evaluation.inventedPaths.length} Invented</span>
+                            </span>
+                          )
                         )}
                         <button
                           type="button"
