@@ -19,12 +19,12 @@
 ## Project Banner & Visual Overview
 
 <p align="center">
-  <img src="public/assets/screenshots/01_landing_hero.png" alt="Cartograph Public Landing Page & Interactive Architecture Engine" width="100%" />
+  <img src="assets/cardograph_hero_banner.png" alt="Cartograph Public Landing Page & Interactive Architecture Engine" width="100%" />
 </p>
 
 > **Live Video Demonstration:**  
 > 📺 **YouTube:** [Watch the Full Cartograph Architecture Walkthrough](https://youtu.be/-AkIj8TG3Uc)  
-> 🎥 **Local Video Asset:** [`public/assets/videos/cartograph-demo.mp4`](public/assets/videos/cartograph-demo.mp4)
+> 🎥 **Demo Video Asset:** [`assets/cardograph-hero.mp4`](assets/cardograph-hero.mp4)
 
 ---
 
@@ -157,12 +157,14 @@ Cartograph eliminates this uncertainty by grounding every visual connection and 
 
 ## E. Screenshots & Visual Demonstration
 
-### 1. Cinematic Public Landing Page
+### 1. Cinematic Public Landing Page & Live Dashboard
 The entry point features a 2-column split hero with real-time GitHub URL validation, crimson brand identity (`#EF3340`), and an integrated demonstration video player with interactive sound toggle.
 
 <p align="center">
-  <img src="public/assets/screenshots/01_landing_hero.png" alt="Cartograph Landing Page Hero" width="100%" />
+  <img src="assets/cardograph_hero_banner.png" alt="Cartograph Landing Page Hero & Dashboard" width="100%" />
 </p>
+
+> 🎥 **Hero Demonstration Video:** Stored directly in [`assets/cardograph-hero.mp4`](assets/cardograph-hero.mp4) (integrated into the hero layout with autoplay, loop, and real-time audio toggle).
 
 ### 2. Interactive Dependency Graph & Infinite Canvas
 Interactive node canvas displaying file relationships, directory folding, dynamic bezier edge routing, and fan-in coupling metrics.
@@ -459,10 +461,12 @@ cartograph/
 │   │   └── storage.ts                   # Supabase Storage client
 │   └── scaffolding/                     # Mock data & fallback sample repositories
 ├── deep-agent/                          # Standalone autonomous LangGraph agent service
+├── assets/                              # Project media assets
+│   ├── cardograph-hero.mp4              # Full architecture demo video
+│   └── cardograph_hero_banner.png       # Updated landing hero & dashboard visual
 ├── public/                              # Static public assets
-│   ├── assets/                          # Organized project media
-│   │   ├── videos/                      # Product demonstration MP4 videos
-│   │   │   └── cartograph-demo.mp4      # Verified video demonstration
+│   ├── assets/                          # Static public web assets
+│   │   ├── videos/                      # Web video streaming sources
 │   │   └── screenshots/                 # High-resolution feature screenshots
 │   └── favicon.ico                      # Site icon
 ├── supabase/                            # Database migrations and seed scripts
