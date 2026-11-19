@@ -29,9 +29,7 @@
 https://github.com/Amitavoo/Cartograph/raw/main/assets/cardograph-hero.mp4
 
 > **Live Video Demonstration:**  
-> 🎥 **Direct Video File:** [`assets/cardograph-hero.mp4`](assets/cardograph-hero.mp4)  
-> 📺 **YouTube Walkthrough:** [Watch on YouTube](https://youtu.be/-AkIj8TG3Uc)
-
+> 🎥 **Direct Video File:** [`assets/cardograph-hero.mp4`](assets/cardograph-hero.mp4)
 ---
 
 ## Table of Contents
